@@ -24,7 +24,7 @@ docker compose up -d
 cd ..
 APP_ENV=development \
 DB_DSN="postgres://postgres:postgres@localhost:5433/operations_db?sslmode=disable" \
-AUTH_ACCESS_SECRET="supersecret" \
+JWT_ACCESS_SECRET="secret-key" \
 go run ./cmd/operations-service
 ```
 
@@ -38,7 +38,7 @@ go run ./cmd/operations-service
 | `DB_MAX_OPEN_CONNS`    | максимум открытых соединений                  | `25`                               |
 | `DB_MAX_IDLE_CONNS`    | максимум соединений в пуле                    | `10`                               |
 | `DB_CONN_MAX_LIFETIME` | TTL соединений                                | `1h`                               |
-| `AUTH_ACCESS_SECRET`   | секрет для проверки JWT из auth-service       | `supersecret`                      |
+| `JWT_ACCESS_SECRET`   | секрет для проверки JWT из auth-service       | `supersecret`                      |
 
 ### Маршруты
 

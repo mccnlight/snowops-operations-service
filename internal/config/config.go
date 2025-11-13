@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/spf13/viper"
@@ -40,8 +41,6 @@ func Load() (*Config, error) {
 
 	v.AutomaticEnv()
 
-	setDefaults(v)
-
 	_ = v.ReadInConfig()
 
 	cfg := &Config{
@@ -57,22 +56,29 @@ func Load() (*Config, error) {
 			ConnMaxLifetime: v.GetDuration("DB_CONN_MAX_LIFETIME"),
 		},
 		Auth: AuthConfig{
-			AccessSecret: v.GetString("AUTH_ACCESS_SECRET"),
+			AccessSecret: v.GetString("JWT_ACCESS_SECRET"),
 		},
+	}
+
+	if err := validate(cfg); err != nil {
+		return nil, err
 	}
 
 	return cfg, nil
 }
 
-func setDefaults(v *viper.Viper) {
-	v.SetDefault("APP_ENV", "development")
-	v.SetDefault("HTTP_HOST", "0.0.0.0")
-	v.SetDefault("HTTP_PORT", 8090)
-
-	v.SetDefault("DB_DSN", "postgres://postgres:postgres@localhost:5432/operations_db?sslmode=disable")
-	v.SetDefault("DB_MAX_OPEN_CONNS", 25)
-	v.SetDefault("DB_MAX_IDLE_CONNS", 10)
-	v.SetDefault("DB_CONN_MAX_LIFETIME", time.Hour)
-
-	v.SetDefault("AUTH_ACCESS_SECRET", "supersecret")
+func validate(cfg *Config) error {
+	if cfg.DB.DSN == "" {
+		return fmt.Errorf("DB_DSN is required")
+	}
+	if cfg.Auth.AccessSecret == "" {
+		return fmt.Errorf("JWT_ACCESS_SECRET is required")
+	}
+	if cfg.HTTP.Host == "" {
+		return fmt.Errorf("HTTP_HOST is required")
+	}
+	if cfg.HTTP.Port == 0 {
+		return fmt.Errorf("HTTP_PORT is required")
+	}
+	return nil
 }
