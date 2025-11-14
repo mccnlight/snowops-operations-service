@@ -35,7 +35,7 @@ func (s *AreaService) List(ctx context.Context, principal model.Principal, input
 		OnlyActive: input.OnlyActive,
 	}
 
-	if principal.IsToo() || principal.IsContractor() {
+	if principal.IsKgu() || principal.IsContractor() {
 		filter.ContractorID = &principal.OrganizationID
 	}
 
@@ -59,7 +59,7 @@ func (s *AreaService) Get(ctx context.Context, principal model.Principal, id uui
 		return area, nil
 	}
 
-	if principal.IsToo() || principal.IsContractor() {
+	if principal.IsKgu() || principal.IsContractor() {
 		if area.DefaultContractorID == nil || *area.DefaultContractorID != principal.OrganizationID {
 			return nil, ErrPermissionDenied
 		}
@@ -79,7 +79,7 @@ type CreateAreaInput struct {
 }
 
 func (s *AreaService) Create(ctx context.Context, principal model.Principal, input CreateAreaInput) (*model.CleaningArea, error) {
-	if !principal.IsAkimat() && !principal.IsToo() {
+	if !principal.IsAkimat() && !principal.IsKgu() {
 		return nil, ErrPermissionDenied
 	}
 
@@ -100,8 +100,8 @@ func (s *AreaService) Create(ctx context.Context, principal model.Principal, inp
 
 	defaultContractorID := input.DefaultContractorID
 
-	if principal.IsToo() {
-		// ТОО может создавать участки только для себя
+	if principal.IsKgu() {
+		// КГУ может создавать участки только для себя
 		if defaultContractorID != nil && *defaultContractorID != principal.OrganizationID {
 			return nil, ErrPermissionDenied
 		}
@@ -141,7 +141,7 @@ func (s *AreaService) UpdateMetadata(ctx context.Context, principal model.Princi
 		return nil, ErrPermissionDenied
 	}
 
-	if principal.IsToo() {
+	if principal.IsKgu() {
 		if input.DefaultContractorID != nil {
 			if *input.DefaultContractorID == nil || **input.DefaultContractorID != principal.OrganizationID {
 				return nil, ErrPermissionDenied
