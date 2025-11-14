@@ -12,7 +12,8 @@ import (
 )
 
 type PolygonFilter struct {
-	OnlyActive bool
+	OnlyActive   bool
+	ContractorID *uuid.UUID
 }
 
 type PolygonRepository struct {
@@ -47,6 +48,18 @@ func (r *PolygonRepository) List(ctx context.Context, filter PolygonFilter) ([]m
 
 	if filter.OnlyActive {
 		query = query.Where("p.is_active = TRUE")
+	}
+
+	if filter.ContractorID != nil {
+		query = query.Where(`
+			EXISTS (
+				SELECT 1
+				FROM polygon_access pa
+				WHERE pa.polygon_id = p.id
+					AND pa.contractor_id = ?
+					AND pa.revoked_at IS NULL
+			)
+		`, *filter.ContractorID)
 	}
 
 	var polygons []model.Polygon
@@ -194,4 +207,18 @@ func (r *PolygonRepository) UpdateGeometry(ctx context.Context, id uuid.UUID, ge
 		return nil, gorm.ErrRecordNotFound
 	}
 	return &polygon, nil
+}
+
+func (r *PolygonRepository) ContainsPoint(ctx context.Context, polygonID uuid.UUID, lat, lng float64) (bool, error) {
+	var contains bool
+	err := r.db.WithContext(ctx).Raw(`
+		SELECT ST_Contains(
+			(SELECT geometry FROM polygons WHERE id = ?),
+			ST_SetSRID(ST_MakePoint(?, ?), 4326)
+		)
+	`, polygonID, lng, lat).Scan(&contains).Error
+	if err != nil {
+		return false, err
+	}
+	return contains, nil
 }

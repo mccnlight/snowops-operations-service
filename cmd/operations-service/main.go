@@ -31,9 +31,25 @@ func main() {
 	areaRepo := repository.NewCleaningAreaRepository(database)
 	polygonRepo := repository.NewPolygonRepository(database)
 	cameraRepo := repository.NewCameraRepository(database)
+	areaAccessRepo := repository.NewCleaningAreaAccessRepository(database)
+	polygonAccessRepo := repository.NewPolygonAccessRepository(database)
 
-	areaService := service.NewAreaService(areaRepo)
-	polygonService := service.NewPolygonService(polygonRepo, cameraRepo)
+	areaService := service.NewAreaService(
+		areaRepo,
+		areaAccessRepo,
+		service.AreaFeatures{
+			AllowAkimatWrite:             cfg.Features.AllowAkimatAreaWrite,
+			AllowGeometryUpdateWhenInUse: cfg.Features.AllowAreaGeometryUpdateWhenInUse,
+		},
+	)
+	polygonService := service.NewPolygonService(
+		polygonRepo,
+		cameraRepo,
+		polygonAccessRepo,
+		service.PolygonFeatures{
+			AllowAkimatWrite: cfg.Features.AllowAkimatPolygonWrite,
+		},
+	)
 
 	tokenParser := auth.NewParser(cfg.Auth.AccessSecret)
 

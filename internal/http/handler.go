@@ -42,16 +42,27 @@ func (h *Handler) Register(r *gin.Engine, authMiddleware gin.HandlerFunc) {
 	protected.GET("/cleaning-areas/:id", h.getArea)
 	protected.PATCH("/cleaning-areas/:id", h.updateArea)
 	protected.PATCH("/cleaning-areas/:id/geometry", h.updateAreaGeometry)
+	protected.GET("/cleaning-areas/:id/access", h.listAreaAccess)
+	protected.POST("/cleaning-areas/:id/access", h.grantAreaAccess)
+	protected.DELETE("/cleaning-areas/:id/access/:contractorId", h.revokeAreaAccess)
+	protected.GET("/cleaning-areas/:id/ticket-template", h.areaTicketTemplate)
 
 	protected.GET("/polygons", h.listPolygons)
 	protected.POST("/polygons", h.createPolygon)
 	protected.GET("/polygons/:id", h.getPolygon)
 	protected.PATCH("/polygons/:id", h.updatePolygon)
 	protected.PATCH("/polygons/:id/geometry", h.updatePolygonGeometry)
+	protected.GET("/polygons/:id/access", h.listPolygonAccess)
+	protected.POST("/polygons/:id/access", h.grantPolygonAccess)
+	protected.DELETE("/polygons/:id/access/:contractorId", h.revokePolygonAccess)
 
 	protected.GET("/polygons/:id/cameras", h.listCameras)
 	protected.POST("/polygons/:id/cameras", h.createCamera)
 	protected.PATCH("/polygons/:id/cameras/:cameraId", h.updateCamera)
+
+	integrations := protected.Group("/integrations")
+	integrations.POST("/polygons/:id/contains", h.polygonContains)
+	integrations.GET("/cameras/:id/polygon", h.cameraPolygon)
 }
 
 func (h *Handler) listAreas(c *gin.Context) {
@@ -293,6 +304,123 @@ func (h *Handler) updateAreaGeometry(c *gin.Context) {
 	c.JSON(http.StatusOK, successResponse(area))
 }
 
+func (h *Handler) listAreaAccess(c *gin.Context) {
+	principal, ok := middleware.MustPrincipal(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, errorResponse("missing principal"))
+		return
+	}
+
+	areaID, err := parseUUIDParam(c, "id")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, errorResponse("invalid area id"))
+		return
+	}
+
+	entries, err := h.areas.ListAccess(c.Request.Context(), principal, areaID)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, successResponse(gin.H{"access": entries}))
+}
+
+type grantAreaAccessRequest struct {
+	ContractorID string  `json:"contractor_id" binding:"required"`
+	Source       *string `json:"source"`
+}
+
+func (h *Handler) grantAreaAccess(c *gin.Context) {
+	principal, ok := middleware.MustPrincipal(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, errorResponse("missing principal"))
+		return
+	}
+
+	areaID, err := parseUUIDParam(c, "id")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, errorResponse("invalid area id"))
+		return
+	}
+
+	var req grantAreaAccessRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, errorResponse(err.Error()))
+		return
+	}
+
+	contractorID, err := uuid.Parse(strings.TrimSpace(req.ContractorID))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, errorResponse("invalid contractor_id"))
+		return
+	}
+
+	source := ""
+	if req.Source != nil {
+		source = *req.Source
+	}
+
+	if err := h.areas.GrantAccess(c.Request.Context(), principal, areaID, contractorID, source); err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusCreated, successResponse(gin.H{"granted": true}))
+}
+
+func (h *Handler) revokeAreaAccess(c *gin.Context) {
+	principal, ok := middleware.MustPrincipal(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, errorResponse("missing principal"))
+		return
+	}
+
+	areaID, err := parseUUIDParam(c, "id")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, errorResponse("invalid area id"))
+		return
+	}
+
+	contractorID, err := parseUUIDParam(c, "contractorId")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, errorResponse("invalid contractor id"))
+		return
+	}
+
+	if err := h.areas.RevokeAccess(c.Request.Context(), principal, areaID, contractorID); err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
+func (h *Handler) areaTicketTemplate(c *gin.Context) {
+	principal, ok := middleware.MustPrincipal(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, errorResponse("missing principal"))
+		return
+	}
+
+	areaID, err := parseUUIDParam(c, "id")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, errorResponse("invalid area id"))
+		return
+	}
+
+	template, err := h.areas.TicketTemplate(c.Request.Context(), principal, areaID)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, successResponse(gin.H{
+		"area":        template.Area,
+		"contractors": template.AccessibleContractors,
+	}))
+}
+
 func (h *Handler) listPolygons(c *gin.Context) {
 	principal, ok := middleware.MustPrincipal(c)
 	if !ok {
@@ -482,6 +610,98 @@ func (h *Handler) updatePolygonGeometry(c *gin.Context) {
 	c.JSON(http.StatusOK, successResponse(polygon))
 }
 
+type grantPolygonAccessRequest struct {
+	ContractorID string  `json:"contractor_id" binding:"required"`
+	Source       *string `json:"source"`
+}
+
+func (h *Handler) listPolygonAccess(c *gin.Context) {
+	principal, ok := middleware.MustPrincipal(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, errorResponse("missing principal"))
+		return
+	}
+
+	polygonID, err := parseUUIDParam(c, "id")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, errorResponse("invalid polygon id"))
+		return
+	}
+
+	entries, err := h.polygons.ListAccess(c.Request.Context(), principal, polygonID)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, successResponse(gin.H{"access": entries}))
+}
+
+func (h *Handler) grantPolygonAccess(c *gin.Context) {
+	principal, ok := middleware.MustPrincipal(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, errorResponse("missing principal"))
+		return
+	}
+
+	polygonID, err := parseUUIDParam(c, "id")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, errorResponse("invalid polygon id"))
+		return
+	}
+
+	var req grantPolygonAccessRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, errorResponse(err.Error()))
+		return
+	}
+
+	contractorID, err := uuid.Parse(strings.TrimSpace(req.ContractorID))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, errorResponse("invalid contractor_id"))
+		return
+	}
+
+	source := ""
+	if req.Source != nil {
+		source = *req.Source
+	}
+
+	if err := h.polygons.GrantAccess(c.Request.Context(), principal, polygonID, contractorID, source); err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusCreated, successResponse(gin.H{"granted": true}))
+}
+
+func (h *Handler) revokePolygonAccess(c *gin.Context) {
+	principal, ok := middleware.MustPrincipal(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, errorResponse("missing principal"))
+		return
+	}
+
+	polygonID, err := parseUUIDParam(c, "id")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, errorResponse("invalid polygon id"))
+		return
+	}
+
+	contractorID, err := parseUUIDParam(c, "contractorId")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, errorResponse("invalid contractor id"))
+		return
+	}
+
+	if err := h.polygons.RevokeAccess(c.Request.Context(), principal, polygonID, contractorID); err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
 func (h *Handler) listCameras(c *gin.Context) {
 	principal, ok := middleware.MustPrincipal(c)
 	if !ok {
@@ -620,6 +840,64 @@ func (h *Handler) updateCamera(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, successResponse(camera))
+}
+
+type polygonContainsRequest struct {
+	Latitude  float64 `json:"lat"`
+	Longitude float64 `json:"lng"`
+}
+
+func (h *Handler) polygonContains(c *gin.Context) {
+	principal, ok := middleware.MustPrincipal(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, errorResponse("missing principal"))
+		return
+	}
+
+	polygonID, err := parseUUIDParam(c, "id")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, errorResponse("invalid polygon id"))
+		return
+	}
+
+	var req polygonContainsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, errorResponse(err.Error()))
+		return
+	}
+
+	contains, err := h.polygons.ContainsPoint(c.Request.Context(), principal, polygonID, req.Latitude, req.Longitude)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, successResponse(gin.H{"inside": contains}))
+}
+
+func (h *Handler) cameraPolygon(c *gin.Context) {
+	principal, ok := middleware.MustPrincipal(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, errorResponse("missing principal"))
+		return
+	}
+
+	cameraID, err := parseUUIDParam(c, "id")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, errorResponse("invalid camera id"))
+		return
+	}
+
+	camera, polygon, err := h.polygons.ResolveCameraPolygon(c.Request.Context(), principal, cameraID)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, successResponse(gin.H{
+		"camera":  camera,
+		"polygon": polygon,
+	}))
 }
 
 func (h *Handler) handleError(c *gin.Context, err error) {

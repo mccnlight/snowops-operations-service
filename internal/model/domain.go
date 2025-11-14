@@ -10,7 +10,8 @@ type UserRole string
 
 const (
 	UserRoleAkimatAdmin     UserRole = "AKIMAT_ADMIN"
-	UserRoleKguAdmin        UserRole = "KGU_ADMIN"
+	UserRoleKguZkhAdmin     UserRole = "KGU_ZKH_ADMIN"
+	UserRoleTooAdmin        UserRole = "TOO_ADMIN"
 	UserRoleContractorAdmin UserRole = "CONTRACTOR_ADMIN"
 	UserRoleDriver          UserRole = "DRIVER"
 )
@@ -82,7 +83,11 @@ func (p Principal) IsAkimat() bool {
 }
 
 func (p Principal) IsKgu() bool {
-	return p.Role == UserRoleKguAdmin
+	return p.Role == UserRoleKguZkhAdmin
+}
+
+func (p Principal) IsTechnicalOperator() bool {
+	return p.Role == UserRoleTooAdmin
 }
 
 func (p Principal) IsContractor() bool {

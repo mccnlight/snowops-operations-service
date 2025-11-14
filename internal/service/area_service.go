@@ -12,12 +12,27 @@ import (
 	"github.com/nurpe/snowops-operations/internal/repository"
 )
 
-type AreaService struct {
-	repo *repository.CleaningAreaRepository
+type AreaFeatures struct {
+	AllowAkimatWrite             bool
+	AllowGeometryUpdateWhenInUse bool
 }
 
-func NewAreaService(repo *repository.CleaningAreaRepository) *AreaService {
-	return &AreaService{repo: repo}
+type AreaService struct {
+	repo       *repository.CleaningAreaRepository
+	accessRepo *repository.CleaningAreaAccessRepository
+	features   AreaFeatures
+}
+
+func NewAreaService(
+	repo *repository.CleaningAreaRepository,
+	accessRepo *repository.CleaningAreaAccessRepository,
+	features AreaFeatures,
+) *AreaService {
+	return &AreaService{
+		repo:       repo,
+		accessRepo: accessRepo,
+		features:   features,
+	}
 }
 
 type ListAreasInput struct {
@@ -26,7 +41,7 @@ type ListAreasInput struct {
 }
 
 func (s *AreaService) List(ctx context.Context, principal model.Principal, input ListAreasInput) ([]model.CleaningArea, error) {
-	if principal.IsDriver() {
+	if principal.IsDriver() || principal.IsTechnicalOperator() {
 		return nil, ErrPermissionDenied
 	}
 
@@ -35,7 +50,7 @@ func (s *AreaService) List(ctx context.Context, principal model.Principal, input
 		OnlyActive: input.OnlyActive,
 	}
 
-	if principal.IsKgu() || principal.IsContractor() {
+	if principal.IsContractor() {
 		filter.ContractorID = &principal.OrganizationID
 	}
 
@@ -43,7 +58,7 @@ func (s *AreaService) List(ctx context.Context, principal model.Principal, input
 }
 
 func (s *AreaService) Get(ctx context.Context, principal model.Principal, id uuid.UUID) (*model.CleaningArea, error) {
-	if principal.IsDriver() {
+	if principal.IsDriver() || principal.IsTechnicalOperator() {
 		return nil, ErrPermissionDenied
 	}
 
@@ -55,15 +70,22 @@ func (s *AreaService) Get(ctx context.Context, principal model.Principal, id uui
 		return nil, err
 	}
 
-	if principal.IsAkimat() {
+	if principal.IsAkimat() || principal.IsKgu() {
 		return area, nil
 	}
 
-	if principal.IsKgu() || principal.IsContractor() {
-		if area.DefaultContractorID == nil || *area.DefaultContractorID != principal.OrganizationID {
-			return nil, ErrPermissionDenied
+	if principal.IsContractor() {
+		if area.DefaultContractorID != nil && *area.DefaultContractorID == principal.OrganizationID {
+			return area, nil
 		}
-		return area, nil
+		hasAccess, err := s.accessRepo.HasAccessForContractor(ctx, area.ID, principal.OrganizationID)
+		if err != nil {
+			return nil, err
+		}
+		if hasAccess {
+			return area, nil
+		}
+		return nil, ErrPermissionDenied
 	}
 
 	return nil, ErrPermissionDenied
@@ -79,7 +101,7 @@ type CreateAreaInput struct {
 }
 
 func (s *AreaService) Create(ctx context.Context, principal model.Principal, input CreateAreaInput) (*model.CleaningArea, error) {
-	if !principal.IsAkimat() && !principal.IsKgu() {
+	if !s.canManageAreas(principal) {
 		return nil, ErrPermissionDenied
 	}
 
@@ -94,21 +116,6 @@ func (s *AreaService) Create(ctx context.Context, principal model.Principal, inp
 	}
 
 	status := model.CleaningAreaStatusActive
-	if input.Status != nil {
-		status = *input.Status
-	}
-
-	defaultContractorID := input.DefaultContractorID
-
-	if principal.IsKgu() {
-		// КГУ может создавать участки только для себя
-		if defaultContractorID != nil && *defaultContractorID != principal.OrganizationID {
-			return nil, ErrPermissionDenied
-		}
-		if defaultContractorID == nil {
-			defaultContractorID = &principal.OrganizationID
-		}
-	}
 
 	params := repository.CreateCleaningAreaParams{
 		Name:                strings.TrimSpace(input.Name),
@@ -116,8 +123,8 @@ func (s *AreaService) Create(ctx context.Context, principal model.Principal, inp
 		GeometryGeoJSON:     input.GeometryGeoJSON,
 		City:                input.City,
 		Status:              status,
-		DefaultContractorID: defaultContractorID,
-		IsActive:            status == model.CleaningAreaStatusActive,
+		DefaultContractorID: input.DefaultContractorID,
+		IsActive:            true,
 	}
 
 	area, err := s.repo.Create(ctx, params)
@@ -137,28 +144,8 @@ type UpdateAreaInput struct {
 }
 
 func (s *AreaService) UpdateMetadata(ctx context.Context, principal model.Principal, input UpdateAreaInput) (*model.CleaningArea, error) {
-	if principal.IsDriver() || principal.IsContractor() {
+	if !s.canManageAreas(principal) {
 		return nil, ErrPermissionDenied
-	}
-
-	if principal.IsKgu() {
-		if input.DefaultContractorID != nil {
-			if *input.DefaultContractorID == nil || **input.DefaultContractorID != principal.OrganizationID {
-				return nil, ErrPermissionDenied
-			}
-		} else {
-			// Ensure area belongs to org
-			area, err := s.repo.GetByID(ctx, input.ID)
-			if err != nil {
-				if errors.Is(err, gorm.ErrRecordNotFound) {
-					return nil, ErrNotFound
-				}
-				return nil, err
-			}
-			if area.DefaultContractorID == nil || *area.DefaultContractorID != principal.OrganizationID {
-				return nil, ErrPermissionDenied
-			}
-		}
 	}
 
 	params := repository.UpdateCleaningAreaParams{
@@ -181,11 +168,21 @@ func (s *AreaService) UpdateMetadata(ctx context.Context, principal model.Princi
 }
 
 func (s *AreaService) UpdateGeometry(ctx context.Context, principal model.Principal, id uuid.UUID, geoJSON string) (*model.CleaningArea, error) {
-	if !principal.IsAkimat() {
+	if !s.canManageAreas(principal) {
 		return nil, ErrPermissionDenied
 	}
 	if strings.TrimSpace(geoJSON) == "" {
 		return nil, ErrInvalidInput
+	}
+
+	if !s.features.AllowGeometryUpdateWhenInUse {
+		inUse, err := s.accessRepo.HasActiveEntries(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if inUse {
+			return nil, ErrConflict
+		}
 	}
 
 	area, err := s.repo.UpdateGeometry(ctx, id, geoJSON)
@@ -198,6 +195,94 @@ func (s *AreaService) UpdateGeometry(ctx context.Context, principal model.Princi
 	return area, nil
 }
 
+func (s *AreaService) ListAccess(ctx context.Context, principal model.Principal, areaID uuid.UUID) ([]repository.CleaningAreaAccessEntry, error) {
+	if !s.canManageAreas(principal) {
+		return nil, ErrPermissionDenied
+	}
+	if _, err := s.repo.GetByID(ctx, areaID); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return s.accessRepo.ListByArea(ctx, areaID)
+}
+
+func (s *AreaService) GrantAccess(ctx context.Context, principal model.Principal, areaID, contractorID uuid.UUID, source string) error {
+	if !s.canManageAreas(principal) {
+		return ErrPermissionDenied
+	}
+	if contractorID == uuid.Nil {
+		return ErrInvalidInput
+	}
+	if _, err := s.repo.GetByID(ctx, areaID); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrNotFound
+		}
+		return err
+	}
+	if strings.TrimSpace(source) == "" {
+		source = "MANUAL"
+	}
+	source = strings.TrimSpace(source)
+	return s.accessRepo.Grant(ctx, areaID, contractorID, source)
+}
+
+func (s *AreaService) RevokeAccess(ctx context.Context, principal model.Principal, areaID, contractorID uuid.UUID) error {
+	if !s.canManageAreas(principal) {
+		return ErrPermissionDenied
+	}
+	if _, err := s.repo.GetByID(ctx, areaID); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrNotFound
+		}
+		return err
+	}
+	return s.accessRepo.Revoke(ctx, areaID, contractorID)
+}
+
+type AreaTicketTemplate struct {
+	Area                  *model.CleaningArea
+	AccessibleContractors []uuid.UUID
+}
+
+func (s *AreaService) TicketTemplate(ctx context.Context, principal model.Principal, areaID uuid.UUID) (*AreaTicketTemplate, error) {
+	if !principal.IsKgu() {
+		return nil, ErrPermissionDenied
+	}
+	area, err := s.repo.GetByID(ctx, areaID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	entries, err := s.accessRepo.ListByArea(ctx, areaID)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[uuid.UUID]struct{})
+	contractors := make([]uuid.UUID, 0, len(entries)+1)
+	for _, entry := range entries {
+		if entry.RevokedAt == nil {
+			if _, exists := seen[entry.ContractorID]; !exists {
+				contractors = append(contractors, entry.ContractorID)
+				seen[entry.ContractorID] = struct{}{}
+			}
+		}
+	}
+	if area.DefaultContractorID != nil {
+		if _, exists := seen[*area.DefaultContractorID]; !exists {
+			contractors = append(contractors, *area.DefaultContractorID)
+		}
+	}
+	template := &AreaTicketTemplate{
+		Area:                  area,
+		AccessibleContractors: contractors,
+	}
+	return template, nil
+}
+
 func normalizeOptionalString(value *string) *string {
 	if value == nil {
 		return nil
@@ -208,4 +293,14 @@ func normalizeOptionalString(value *string) *string {
 	}
 	result := trimmed
 	return &result
+}
+
+func (s *AreaService) canManageAreas(principal model.Principal) bool {
+	if principal.IsKgu() {
+		return true
+	}
+	if s.features.AllowAkimatWrite && principal.IsAkimat() {
+		return true
+	}
+	return false
 }

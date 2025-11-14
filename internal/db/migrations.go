@@ -62,6 +62,34 @@ var migrationStatements = []string{
 	`CREATE INDEX IF NOT EXISTS idx_cameras_polygon_id ON cameras (polygon_id);`,
 	`CREATE INDEX IF NOT EXISTS idx_cameras_type ON cameras (type);`,
 	`CREATE INDEX IF NOT EXISTS idx_cameras_location ON cameras USING GIST (location);`,
+	`CREATE TABLE IF NOT EXISTS cleaning_area_access (
+		id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+		cleaning_area_id UUID NOT NULL REFERENCES cleaning_areas(id) ON DELETE CASCADE,
+		contractor_id UUID NOT NULL,
+		source TEXT NOT NULL DEFAULT 'MANUAL',
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		revoked_at TIMESTAMPTZ
+	);`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS idx_cleaning_area_access_unique
+		ON cleaning_area_access (cleaning_area_id, contractor_id);`,
+	`CREATE INDEX IF NOT EXISTS idx_cleaning_area_access_contractor
+		ON cleaning_area_access (contractor_id)
+		WHERE revoked_at IS NULL;`,
+	`CREATE TABLE IF NOT EXISTS polygon_access (
+		id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+		polygon_id UUID NOT NULL REFERENCES polygons(id) ON DELETE CASCADE,
+		contractor_id UUID NOT NULL,
+		source TEXT NOT NULL DEFAULT 'MANUAL',
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		revoked_at TIMESTAMPTZ
+	);`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS idx_polygon_access_unique
+		ON polygon_access (polygon_id, contractor_id);`,
+	`CREATE INDEX IF NOT EXISTS idx_polygon_access_contractor
+		ON polygon_access (contractor_id)
+		WHERE revoked_at IS NULL;`,
 	`CREATE OR REPLACE FUNCTION set_updated_at()
 	RETURNS TRIGGER AS $$
 	BEGIN
@@ -94,6 +122,26 @@ var migrationStatements = []string{
 		IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_cameras_updated_at') THEN
 			CREATE TRIGGER trg_cameras_updated_at
 				BEFORE UPDATE ON cameras
+				FOR EACH ROW
+				EXECUTE PROCEDURE set_updated_at();
+		END IF;
+	END
+	$$;`,
+	`DO $$
+	BEGIN
+		IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_cleaning_area_access_updated_at') THEN
+			CREATE TRIGGER trg_cleaning_area_access_updated_at
+				BEFORE UPDATE ON cleaning_area_access
+				FOR EACH ROW
+				EXECUTE PROCEDURE set_updated_at();
+		END IF;
+	END
+	$$;`,
+	`DO $$
+	BEGIN
+		IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_polygon_access_updated_at') THEN
+			CREATE TRIGGER trg_polygon_access_updated_at
+				BEFORE UPDATE ON polygon_access
 				FOR EACH ROW
 				EXECUTE PROCEDURE set_updated_at();
 		END IF;

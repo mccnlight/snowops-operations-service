@@ -50,7 +50,18 @@ func (r *CleaningAreaRepository) List(ctx context.Context, filter CleaningAreaFi
 	}
 
 	if filter.ContractorID != nil {
-		query = query.Where("default_contractor_id = ?", *filter.ContractorID)
+		query = query.Where(`
+			(
+				default_contractor_id = ?
+				OR EXISTS (
+					SELECT 1
+					FROM cleaning_area_access ca
+					WHERE ca.cleaning_area_id = cleaning_areas.id
+						AND ca.contractor_id = ?
+						AND ca.revoked_at IS NULL
+				)
+			)
+		`, *filter.ContractorID, *filter.ContractorID)
 	}
 
 	query = query.Order("name ASC")

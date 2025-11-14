@@ -23,11 +23,18 @@ type AuthConfig struct {
 	AccessSecret string
 }
 
+type FeatureFlags struct {
+	AllowAkimatAreaWrite             bool
+	AllowAkimatPolygonWrite          bool
+	AllowAreaGeometryUpdateWhenInUse bool
+}
+
 type Config struct {
 	Environment string
 	HTTP        HTTPConfig
 	DB          DBConfig
 	Auth        AuthConfig
+	Features    FeatureFlags
 }
 
 func Load() (*Config, error) {
@@ -57,6 +64,11 @@ func Load() (*Config, error) {
 		},
 		Auth: AuthConfig{
 			AccessSecret: v.GetString("JWT_ACCESS_SECRET"),
+		},
+		Features: FeatureFlags{
+			AllowAkimatAreaWrite:             v.GetBool("FEATURE_ALLOW_AKIMAT_AREA_WRITE"),
+			AllowAkimatPolygonWrite:          v.GetBool("FEATURE_ALLOW_AKIMAT_POLYGON_WRITE"),
+			AllowAreaGeometryUpdateWhenInUse: v.GetBool("FEATURE_ALLOW_AREA_GEOMETRY_UPDATE_WHEN_IN_USE"),
 		},
 	}
 
