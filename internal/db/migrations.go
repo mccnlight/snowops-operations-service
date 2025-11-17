@@ -147,6 +147,61 @@ var migrationStatements = []string{
 		END IF;
 	END
 	$$;`,
+	`CREATE TABLE IF NOT EXISTS vehicles (
+		id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+		plate_number TEXT NOT NULL,
+		contractor_id UUID,
+		is_active BOOLEAN NOT NULL DEFAULT TRUE,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	);`,
+	`CREATE INDEX IF NOT EXISTS idx_vehicles_contractor_id ON vehicles (contractor_id) WHERE contractor_id IS NOT NULL;`,
+	`CREATE INDEX IF NOT EXISTS idx_vehicles_is_active ON vehicles (is_active);`,
+	`DO $$
+	BEGIN
+		IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_vehicles_updated_at') THEN
+			CREATE TRIGGER trg_vehicles_updated_at
+				BEFORE UPDATE ON vehicles
+				FOR EACH ROW
+				EXECUTE PROCEDURE set_updated_at();
+		END IF;
+	END
+	$$;`,
+	`CREATE TABLE IF NOT EXISTS gps_devices (
+		id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+		vehicle_id UUID NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
+		imei TEXT,
+		is_active BOOLEAN NOT NULL DEFAULT TRUE,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	);`,
+	`CREATE INDEX IF NOT EXISTS idx_gps_devices_vehicle_id ON gps_devices (vehicle_id);`,
+	`CREATE INDEX IF NOT EXISTS idx_gps_devices_is_active ON gps_devices (is_active);`,
+	`DO $$
+	BEGIN
+		IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_gps_devices_updated_at') THEN
+			CREATE TRIGGER trg_gps_devices_updated_at
+				BEFORE UPDATE ON gps_devices
+				FOR EACH ROW
+				EXECUTE PROCEDURE set_updated_at();
+		END IF;
+	END
+	$$;`,
+	`CREATE TABLE IF NOT EXISTS gps_points (
+		id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+		gps_device_id UUID REFERENCES gps_devices(id) ON DELETE SET NULL,
+		vehicle_id UUID NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
+		captured_at TIMESTAMPTZ NOT NULL,
+		lat NUMERIC(9,6) NOT NULL,
+		lon NUMERIC(9,6) NOT NULL,
+		speed_kmh NUMERIC(6,2) NOT NULL DEFAULT 0,
+		heading_deg NUMERIC(6,2) NOT NULL DEFAULT 0,
+		raw_payload TEXT,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	);`,
+	`CREATE INDEX IF NOT EXISTS idx_gps_points_vehicle_id ON gps_points (vehicle_id);`,
+	`CREATE INDEX IF NOT EXISTS idx_gps_points_captured_at ON gps_points (vehicle_id, captured_at DESC);`,
+	`CREATE INDEX IF NOT EXISTS idx_gps_points_location ON gps_points USING GIST (ST_SetSRID(ST_MakePoint(lon, lat), 4326));`,
 }
 
 func runMigrations(db *gorm.DB) error {

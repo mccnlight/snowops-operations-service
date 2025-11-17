@@ -3,8 +3,10 @@ package http
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -16,20 +18,23 @@ import (
 )
 
 type Handler struct {
-	areas    *service.AreaService
-	polygons *service.PolygonService
-	log      zerolog.Logger
+	areas       *service.AreaService
+	polygons    *service.PolygonService
+	monitoring  *service.MonitoringService
+	log         zerolog.Logger
 }
 
 func NewHandler(
 	areas *service.AreaService,
 	polygons *service.PolygonService,
+	monitoring *service.MonitoringService,
 	log zerolog.Logger,
 ) *Handler {
 	return &Handler{
-		areas:    areas,
-		polygons: polygons,
-		log:      log,
+		areas:      areas,
+		polygons:   polygons,
+		monitoring: monitoring,
+		log:        log,
 	}
 }
 
@@ -63,6 +68,10 @@ func (h *Handler) Register(r *gin.Engine, authMiddleware gin.HandlerFunc) {
 	integrations := protected.Group("/integrations")
 	integrations.POST("/polygons/:id/contains", h.polygonContains)
 	integrations.GET("/cameras/:id/polygon", h.cameraPolygon)
+
+	monitoring := protected.Group("/monitoring")
+	monitoring.GET("/vehicles-live", h.vehiclesLive)
+	monitoring.GET("/vehicles/:id/track", h.vehicleTrack)
 }
 
 func (h *Handler) listAreas(c *gin.Context) {
@@ -972,4 +981,137 @@ func errorResponse(message string) gin.H {
 	return gin.H{
 		"error": message,
 	}
+}
+
+func (h *Handler) vehiclesLive(c *gin.Context) {
+	principal, ok := middleware.MustPrincipal(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, errorResponse("missing principal"))
+		return
+	}
+
+	// Парсим bbox (опционально)
+	var bbox *service.BBox
+	if minLat := c.Query("min_lat"); minLat != "" {
+		var err error
+		var minLatF, minLonF, maxLatF, maxLonF float64
+		if minLatF, err = parseFloatQuery(c, "min_lat"); err != nil {
+			c.JSON(http.StatusBadRequest, errorResponse("invalid min_lat"))
+			return
+		}
+		if minLonF, err = parseFloatQuery(c, "min_lon"); err != nil {
+			c.JSON(http.StatusBadRequest, errorResponse("invalid min_lon"))
+			return
+		}
+		if maxLatF, err = parseFloatQuery(c, "max_lat"); err != nil {
+			c.JSON(http.StatusBadRequest, errorResponse("invalid max_lat"))
+			return
+		}
+		if maxLonF, err = parseFloatQuery(c, "max_lon"); err != nil {
+			c.JSON(http.StatusBadRequest, errorResponse("invalid max_lon"))
+			return
+		}
+		bbox = &service.BBox{
+			MinLat: minLatF,
+			MinLon: minLonF,
+			MaxLat: maxLatF,
+			MaxLon: maxLonF,
+		}
+	}
+
+	// Парсим contractor_id (опционально)
+	var contractorID *uuid.UUID
+	if contractorIDStr := c.Query("contractor_id"); contractorIDStr != "" {
+		parsed, err := uuid.Parse(contractorIDStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, errorResponse("invalid contractor_id"))
+			return
+		}
+		contractorID = &parsed
+	}
+
+	vehicles, err := h.monitoring.GetVehiclesLive(
+		c.Request.Context(),
+		principal,
+		service.VehiclesLiveInput{
+			BBox:         bbox,
+			ContractorID: contractorID,
+		},
+	)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, successResponse(gin.H{
+		"timestamp": time.Now().Format(time.RFC3339),
+		"vehicles":   vehicles,
+	}))
+}
+
+func (h *Handler) vehicleTrack(c *gin.Context) {
+	principal, ok := middleware.MustPrincipal(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, errorResponse("missing principal"))
+		return
+	}
+
+	vehicleID, err := parseUUIDParam(c, "id")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, errorResponse("invalid vehicle id"))
+		return
+	}
+
+	// Парсим временной диапазон
+	from := time.Now().Add(-1 * time.Hour) // По умолчанию последний час
+	to := time.Now()
+
+	if fromStr := c.Query("from"); fromStr != "" {
+		parsed, err := time.Parse(time.RFC3339, fromStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, errorResponse("invalid from parameter (use RFC3339 format)"))
+			return
+		}
+		from = parsed
+	}
+
+	if toStr := c.Query("to"); toStr != "" {
+		parsed, err := time.Parse(time.RFC3339, toStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, errorResponse("invalid to parameter (use RFC3339 format)"))
+			return
+		}
+		to = parsed
+	}
+
+	points, err := h.monitoring.GetVehicleTrack(
+		c.Request.Context(),
+		principal,
+		vehicleID,
+		service.VehicleTrackInput{
+			From: from,
+			To:   to,
+		},
+	)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, successResponse(gin.H{
+		"vehicle_id": vehicleID.String(),
+		"from":       from.Format(time.RFC3339),
+		"to":         to.Format(time.RFC3339),
+		"points":     points,
+	}))
+}
+
+func parseFloatQuery(c *gin.Context, param string) (float64, error) {
+	raw := strings.TrimSpace(c.Query(param))
+	if raw == "" {
+		return 0, errors.New("empty value")
+	}
+	var value float64
+	_, err := fmt.Sscanf(raw, "%f", &value)
+	return value, err
 }

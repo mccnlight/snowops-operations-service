@@ -76,6 +76,7 @@ type Principal struct {
 	UserID         uuid.UUID
 	OrganizationID uuid.UUID
 	Role           UserRole
+	DriverID       *uuid.UUID
 }
 
 func (p Principal) IsAkimat() bool {
@@ -96,4 +97,43 @@ func (p Principal) IsContractor() bool {
 
 func (p Principal) IsDriver() bool {
 	return p.Role == UserRoleDriver
+}
+
+type VehicleStatus string
+
+const (
+	VehicleStatusInTrip  VehicleStatus = "IN_TRIP"
+	VehicleStatusIdle    VehicleStatus = "IDLE"
+	VehicleStatusOffline VehicleStatus = "OFFLINE"
+)
+
+type Vehicle struct {
+	ID           uuid.UUID  `json:"id"`
+	PlateNumber  string     `json:"plate_number"`
+	ContractorID *uuid.UUID `json:"contractor_id,omitempty"`
+	IsActive     bool       `json:"is_active"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+}
+
+type GPSDevice struct {
+	ID        uuid.UUID `json:"id"`
+	VehicleID uuid.UUID `json:"vehicle_id"`
+	IMEI      *string   `json:"imei,omitempty"`
+	IsActive  bool      `json:"is_active"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type GPSPoint struct {
+	ID          uuid.UUID  `json:"id"`
+	GPSDeviceID *uuid.UUID `json:"gps_device_id,omitempty"`
+	VehicleID   uuid.UUID  `json:"vehicle_id"`
+	CapturedAt  time.Time  `json:"captured_at"`
+	Lat         float64    `json:"lat"`
+	Lon         float64    `json:"lon"`
+	SpeedKmh    float64    `json:"speed_kmh"`
+	HeadingDeg  float64    `json:"heading_deg"`
+	RawPayload  *string    `json:"raw_payload,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
 }

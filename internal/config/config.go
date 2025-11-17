@@ -29,12 +29,19 @@ type FeatureFlags struct {
 	AllowAreaGeometryUpdateWhenInUse bool
 }
 
+type GPSSimulatorConfig struct {
+	Enabled      bool
+	UpdateInterval time.Duration
+	CleanupDays    int // Автоматическая очистка точек старше N дней (0 = отключено)
+}
+
 type Config struct {
 	Environment string
 	HTTP        HTTPConfig
 	DB          DBConfig
 	Auth        AuthConfig
 	Features    FeatureFlags
+	GPSSimulator GPSSimulatorConfig
 }
 
 func Load() (*Config, error) {
@@ -70,6 +77,11 @@ func Load() (*Config, error) {
 			AllowAkimatPolygonWrite:          v.GetBool("FEATURE_ALLOW_AKIMAT_POLYGON_WRITE"),
 			AllowAreaGeometryUpdateWhenInUse: v.GetBool("FEATURE_ALLOW_AREA_GEOMETRY_UPDATE_WHEN_IN_USE"),
 		},
+		GPSSimulator: GPSSimulatorConfig{
+			Enabled:       getBoolWithDefault(v, "GPS_SIMULATOR_ENABLED", v.GetString("APP_ENV") == "development"),
+			UpdateInterval: getDurationWithDefault(v, "GPS_SIMULATOR_INTERVAL", 5*time.Second),
+			CleanupDays:    getIntWithDefault(v, "GPS_SIMULATOR_CLEANUP_DAYS", 7),
+		},
 	}
 
 	if err := validate(cfg); err != nil {
@@ -93,4 +105,25 @@ func validate(cfg *Config) error {
 		return fmt.Errorf("HTTP_PORT is required")
 	}
 	return nil
+}
+
+func getDurationWithDefault(v *viper.Viper, key string, defaultValue time.Duration) time.Duration {
+	if v.IsSet(key) {
+		return v.GetDuration(key)
+	}
+	return defaultValue
+}
+
+func getBoolWithDefault(v *viper.Viper, key string, defaultValue bool) bool {
+	if v.IsSet(key) {
+		return v.GetBool(key)
+	}
+	return defaultValue
+}
+
+func getIntWithDefault(v *viper.Viper, key string, defaultValue int) int {
+	if v.IsSet(key) {
+		return v.GetInt(key)
+	}
+	return defaultValue
 }

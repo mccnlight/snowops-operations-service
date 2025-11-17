@@ -12,6 +12,7 @@ type Claims struct {
 	UserID    uuid.UUID      `json:"sub"`
 	Role      model.UserRole `json:"role"`
 	OrgID     uuid.UUID      `json:"org_id"`
+	DriverID  *uuid.UUID     `json:"driver_id,omitempty"`
 	jwt.RegisteredClaims
 }
 

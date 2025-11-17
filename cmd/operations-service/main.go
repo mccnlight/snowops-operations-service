@@ -12,6 +12,7 @@ import (
 	"github.com/nurpe/snowops-operations/internal/logger"
 	"github.com/nurpe/snowops-operations/internal/repository"
 	"github.com/nurpe/snowops-operations/internal/service"
+	"github.com/nurpe/snowops-operations/internal/simulator"
 )
 
 func main() {
@@ -33,6 +34,8 @@ func main() {
 	cameraRepo := repository.NewCameraRepository(database)
 	areaAccessRepo := repository.NewCleaningAreaAccessRepository(database)
 	polygonAccessRepo := repository.NewPolygonAccessRepository(database)
+	vehicleRepo := repository.NewVehicleRepository(database)
+	gpsRepo := repository.NewGPSPointRepository(database)
 
 	areaService := service.NewAreaService(
 		areaRepo,
@@ -50,12 +53,43 @@ func main() {
 			AllowAkimatWrite: cfg.Features.AllowAkimatPolygonWrite,
 		},
 	)
+	monitoringService := service.NewMonitoringService(
+		vehicleRepo,
+		gpsRepo,
+		areaRepo,
+		polygonRepo,
+		areaAccessRepo,
+	)
 
 	tokenParser := auth.NewParser(cfg.Auth.AccessSecret)
 
-	handler := httphandler.NewHandler(areaService, polygonService, appLogger)
+	handler := httphandler.NewHandler(areaService, polygonService, monitoringService, appLogger)
 	authMiddleware := middleware.Auth(tokenParser)
 	router := httphandler.NewRouter(handler, authMiddleware, cfg.Environment)
+
+	// Запускаем GPS-симулятор (если включен)
+	if cfg.GPSSimulator.Enabled {
+		osmFile := "kz_bbox.pbf"
+		simulator := simulator.NewGPSSimulator(
+			gpsRepo,
+			vehicleRepo,
+			appLogger,
+			osmFile,
+			cfg.GPSSimulator.UpdateInterval,
+			cfg.GPSSimulator.CleanupDays,
+		)
+		if err := simulator.Start(); err != nil {
+			appLogger.Warn().Err(err).Msg("failed to start GPS simulator")
+		} else {
+			defer simulator.Stop()
+			appLogger.Info().
+				Dur("interval", cfg.GPSSimulator.UpdateInterval).
+				Int("cleanup_days", cfg.GPSSimulator.CleanupDays).
+				Msg("GPS simulator started")
+		}
+	} else {
+		appLogger.Info().Msg("GPS simulator disabled")
+	}
 
 	addr := fmt.Sprintf("%s:%d", cfg.HTTP.Host, cfg.HTTP.Port)
 	appLogger.Info().Str("addr", addr).Msg("starting operations service")

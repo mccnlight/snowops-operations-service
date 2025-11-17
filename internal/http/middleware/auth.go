@@ -41,6 +41,7 @@ func Auth(parser *auth.Parser) gin.HandlerFunc {
 			UserID:         claims.UserID,
 			OrganizationID: claims.OrgID,
 			Role:           claims.Role,
+			DriverID:       claims.DriverID,
 		}
 
 		c.Set(claimsContextKey, claims)
