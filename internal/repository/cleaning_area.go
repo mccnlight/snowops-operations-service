@@ -251,6 +251,48 @@ func (r *CleaningAreaRepository) UpdateGeometry(ctx context.Context, id uuid.UUI
 	return &area, nil
 }
 
+func (r *CleaningAreaRepository) ContainsPoint(ctx context.Context, areaID uuid.UUID, lat, lng float64) (bool, error) {
+	var contains bool
+	err := r.db.WithContext(ctx).Raw(`
+		SELECT ST_Contains(
+			(SELECT geometry FROM cleaning_areas WHERE id = ? AND is_active = TRUE),
+			ST_SetSRID(ST_MakePoint(?, ?), 4326)
+		)
+	`, areaID, lng, lat).Scan(&contains).Error
+	if err != nil {
+		return false, err
+	}
+	return contains, nil
+}
+
+func (r *CleaningAreaRepository) FindAreaContainingPoint(ctx context.Context, lat, lng float64) (*model.CleaningArea, error) {
+	var area model.CleaningArea
+	err := r.db.WithContext(ctx).Raw(`
+		SELECT
+			id,
+			name,
+			description,
+			ST_AsGeoJSON(geometry) AS geometry,
+			city,
+			status::text AS status,
+			default_contractor_id,
+			is_active,
+			created_at,
+			updated_at
+		FROM cleaning_areas
+		WHERE is_active = TRUE
+			AND ST_Contains(geometry, ST_SetSRID(ST_MakePoint(?, ?), 4326))
+		LIMIT 1
+	`, lng, lat).Scan(&area).Error
+	if err != nil {
+		return nil, err
+	}
+	if area.ID == uuid.Nil {
+		return nil, gorm.ErrRecordNotFound
+	}
+	return &area, nil
+}
+
 func serializeStatuses(values []model.CleaningAreaStatus) []string {
 	result := make([]string, 0, len(values))
 	for _, s := range values {

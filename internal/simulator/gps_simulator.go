@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"os"
 	"time"
 
 	"github.com/google/uuid"
@@ -30,19 +29,24 @@ type LatLon struct {
 }
 
 type GPSSimulator struct {
-	db            *repository.GPSPointRepository
-	vehicleRepo   *repository.VehicleRepository
-	log           zerolog.Logger
-	osmFile       string
-	updateInterval time.Duration
-	cleanupDays    int
-	roads         []Road
-	currentRoad   *Road
-	currentIndex  int
-	currentPos    float64 // позиция на текущем сегменте (0.0 - 1.0)
-	vehicleID     uuid.UUID
-	ctx           context.Context
-	cancel        context.CancelFunc
+	db               *repository.GPSPointRepository
+	vehicleRepo      *repository.VehicleRepository
+	areaRepo         *repository.CleaningAreaRepository
+	polygonRepo      *repository.PolygonRepository
+	cameraRepo       *repository.CameraRepository
+	log              zerolog.Logger
+	osmFile          string
+	updateInterval   time.Duration
+	cleanupDays      int
+	roads            []Road
+	currentRoad      *Road
+	currentIndex     int
+	currentPos       float64 // позиция на текущем сегменте (0.0 - 1.0)
+	vehicleID        uuid.UUID
+	wasInPolygon     bool       // флаг для отслеживания входа в полигон
+	currentPolygonID *uuid.UUID // ID текущего полигона, если внутри
+	ctx              context.Context
+	cancel           context.CancelFunc
 }
 
 type Road struct {
@@ -53,25 +57,32 @@ type Road struct {
 func NewGPSSimulator(
 	db *repository.GPSPointRepository,
 	vehicleRepo *repository.VehicleRepository,
+	areaRepo *repository.CleaningAreaRepository,
+	polygonRepo *repository.PolygonRepository,
+	cameraRepo *repository.CameraRepository,
 	log zerolog.Logger,
 	osmFile string,
 	updateInterval time.Duration,
 	cleanupDays int,
 ) *GPSSimulator {
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	// Вычисляем расстояние за тик
 	DistancePerTick = SpeedMs * updateInterval.Seconds()
-	
+
 	return &GPSSimulator{
-		db:            db,
-		vehicleRepo:   vehicleRepo,
-		log:           log,
-		osmFile:       osmFile,
+		db:             db,
+		vehicleRepo:    vehicleRepo,
+		areaRepo:       areaRepo,
+		polygonRepo:    polygonRepo,
+		cameraRepo:     cameraRepo,
+		log:            log,
+		osmFile:        osmFile,
 		updateInterval: updateInterval,
-		cleanupDays:   cleanupDays,
-		ctx:           ctx,
-		cancel:        cancel,
+		cleanupDays:    cleanupDays,
+		wasInPolygon:   false,
+		ctx:            ctx,
+		cancel:         cancel,
 	}
 }
 
@@ -83,28 +94,32 @@ func (s *GPSSimulator) Start() error {
 	}
 	s.vehicleID = vehicle.ID
 
-	// Загружаем дороги из OSM
-	if err := s.loadRoads(); err != nil {
-		s.log.Warn().Err(err).Msg("failed to load roads from OSM, using fallback route")
-		// Используем простой маршрут по умолчанию (Петропавловск)
-		s.roads = []Road{
-			{
-				Nodes: []LatLon{
-					{Lat: 54.80, Lon: 69.00},
-					{Lat: 54.85, Lon: 69.10},
-					{Lat: 54.90, Lon: 69.20},
-					{Lat: 54.95, Lon: 69.30},
-				},
-				Name: "Fallback Route",
-			},
-		}
-	}
+	// Загружаем захардкоженный маршрут
+	s.loadHardcodedRoute()
 
 	if len(s.roads) == 0 {
 		return fmt.Errorf("no roads found")
 	}
 
-	// Выбираем случайную дорогу
+	// Валидация начальной точки - проверяем, что она находится в участке уборки
+	startPoint := s.roads[0].Nodes[0]
+	area, err := s.areaRepo.FindAreaContainingPoint(s.ctx, startPoint.Lat, startPoint.Lon)
+	if err != nil {
+		s.log.Warn().
+			Float64("lat", startPoint.Lat).
+			Float64("lon", startPoint.Lon).
+			Err(err).
+			Msg("start point is not in any cleaning area, continuing anyway")
+	} else {
+		s.log.Info().
+			Str("area_id", area.ID.String()).
+			Str("area_name", area.Name).
+			Float64("lat", startPoint.Lat).
+			Float64("lon", startPoint.Lon).
+			Msg("start point validated - inside cleaning area")
+	}
+
+	// Выбираем первую дорогу (захардкоженный маршрут)
 	s.selectRandomRoad()
 
 	// Запускаем симуляцию
@@ -123,58 +138,40 @@ func (s *GPSSimulator) Stop() {
 	s.log.Info().Msg("GPS simulator stopped")
 }
 
-func (s *GPSSimulator) loadRoads() error {
-	// Простой парсер OSM PBF - для MVP используем упрощённый подход
-	// В реальности нужно использовать библиотеку типа github.com/qedus/osm
-	// Но для демо создадим простой парсер, который ищет primary highways
-
-	file, err := os.Open(s.osmFile)
-	if err != nil {
-		return fmt.Errorf("failed to open OSM file: %w", err)
-	}
-	defer file.Close()
-
-	// Для MVP используем упрощённый подход - создаём несколько тестовых дорог
-	// В продакшене нужно использовать полноценный парсер OSM PBF
-	// Здесь создаём маршруты в районе Петропавловска
+func (s *GPSSimulator) loadHardcodedRoute() {
+	// Захардкоженный маршрут для симуляции
+	// Начальная точка: 54.842920/69.207121
+	// Маршрут: список промежуточных точек
+	// Конечная точка: 54.841848/69.264708
 	s.roads = []Road{
 		{
-			Name: "Primary Highway 1",
+			Name: "Hardcoded Simulation Route",
 			Nodes: []LatLon{
-				{Lat: 54.8700, Lon: 69.1400},
-				{Lat: 54.8720, Lon: 69.1450},
-				{Lat: 54.8740, Lon: 69.1500},
-				{Lat: 54.8760, Lon: 69.1550},
-				{Lat: 54.8780, Lon: 69.1600},
-				{Lat: 54.8800, Lon: 69.1650},
-			},
-		},
-		{
-			Name: "Primary Highway 2",
-			Nodes: []LatLon{
-				{Lat: 54.8600, Lon: 69.1300},
-				{Lat: 54.8650, Lon: 69.1350},
-				{Lat: 54.8700, Lon: 69.1400},
-				{Lat: 54.8750, Lon: 69.1450},
-				{Lat: 54.8800, Lon: 69.1500},
-			},
-		},
-		{
-			Name: "Primary Highway 3",
-			Nodes: []LatLon{
-				{Lat: 54.8500, Lon: 69.1200},
-				{Lat: 54.8550, Lon: 69.1250},
-				{Lat: 54.8600, Lon: 69.1300},
-				{Lat: 54.8650, Lon: 69.1350},
-				{Lat: 54.8700, Lon: 69.1400},
+				// Начальная точка
+				{Lat: 54.842920, Lon: 69.207121},
+				// Промежуточные точки маршрута
+				{Lat: 54.843342, Lon: 69.209881},
+				{Lat: 54.843009, Lon: 69.213915},
+				{Lat: 54.842807, Lon: 69.216831},
+				{Lat: 54.842608, Lon: 69.219229},
+				{Lat: 54.842308, Lon: 69.220744},
+				{Lat: 54.841766, Lon: 69.222453},
+				{Lat: 54.841165, Lon: 69.223885},
+				{Lat: 54.840893, Lon: 69.224845},
+				{Lat: 54.840708, Lon: 69.225808},
+				{Lat: 54.840587, Lon: 69.227077},
+				{Lat: 54.840617, Lon: 69.228198},
+				{Lat: 54.840793, Lon: 69.229598},
+				{Lat: 54.841392, Lon: 69.231320},
+				{Lat: 54.84817, Lon: 69.24148},
+				{Lat: 54.846661, Lon: 69.262061},
+				{Lat: 54.846427, Lon: 69.261519},
+				{Lat: 54.841569, Lon: 69.265569},
+				// Конечная точка
+				{Lat: 54.841848, Lon: 69.264708},
 			},
 		},
 	}
-
-	// TODO: В будущем здесь должен быть полноценный парсер OSM PBF
-	// который будет искать ways с highway=primary и извлекать их nodes
-
-	return nil
 }
 
 func (s *GPSSimulator) selectRandomRoad() {
@@ -264,6 +261,62 @@ func (s *GPSSimulator) updatePosition() error {
 	// Вычисляем направление (heading)
 	heading := s.calculateHeading(segment.From, segment.To)
 
+	// Проверяем вход в полигон
+	var lprEvent map[string]interface{}
+	inPolygon := false
+	var currentPolygonID *uuid.UUID
+
+	// Получаем все активные полигоны
+	polygons, err := s.polygonRepo.List(s.ctx, repository.PolygonFilter{OnlyActive: true})
+	if err == nil {
+		// Проверяем каждый полигон
+		for _, polygon := range polygons {
+			contains, err := s.polygonRepo.ContainsPoint(s.ctx, polygon.ID, lat, lon)
+			if err == nil && contains {
+				inPolygon = true
+				currentPolygonID = &polygon.ID
+
+				// Если только что вошли в полигон (были снаружи, теперь внутри)
+				if !s.wasInPolygon {
+					s.log.Info().
+						Str("polygon_id", polygon.ID.String()).
+						Str("polygon_name", polygon.Name).
+						Float64("lat", lat).
+						Float64("lon", lon).
+						Msg("vehicle entered polygon - generating LPR event")
+
+					// Ищем LPR камеру в полигоне
+					var cameraID *uuid.UUID
+					cameras, err := s.cameraRepo.ListByPolygon(s.ctx, polygon.ID)
+					if err == nil {
+						for _, camera := range cameras {
+							if camera.IsActive && camera.Type == model.CameraTypeLPR {
+								cameraID = &camera.ID
+								break
+							}
+						}
+					}
+
+					// Формируем LPR событие
+					lprEvent = map[string]interface{}{
+						"polygon_id":   polygon.ID.String(),
+						"polygon_name": polygon.Name,
+						"event_type":   "ENTRY",
+						"timestamp":    time.Now().Format(time.RFC3339),
+					}
+					if cameraID != nil {
+						lprEvent["camera_id"] = cameraID.String()
+					}
+				}
+				break
+			}
+		}
+	}
+
+	// Обновляем флаг
+	s.wasInPolygon = inPolygon
+	s.currentPolygonID = currentPolygonID
+
 	// Создаём GPS точку
 	point := &model.GPSPoint{
 		ID:         uuid.New(),
@@ -280,6 +333,12 @@ func (s *GPSSimulator) updatePosition() error {
 		"simulated": true,
 		"source":    "osm-simulator",
 	}
+
+	// Добавляем LPR событие, если оно есть
+	if lprEvent != nil {
+		payload["lpr_event"] = lprEvent
+	}
+
 	payloadJSON, _ := json.Marshal(payload)
 	payloadStr := string(payloadJSON)
 	point.RawPayload = &payloadStr
@@ -364,4 +423,3 @@ func (s *GPSSimulator) cleanupOldPoints() {
 		}
 	}
 }
-

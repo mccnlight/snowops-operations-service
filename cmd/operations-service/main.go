@@ -73,6 +73,9 @@ func main() {
 		simulator := simulator.NewGPSSimulator(
 			gpsRepo,
 			vehicleRepo,
+			areaRepo,
+			polygonRepo,
+			cameraRepo,
 			appLogger,
 			osmFile,
 			cfg.GPSSimulator.UpdateInterval,
