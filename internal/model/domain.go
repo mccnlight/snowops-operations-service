@@ -41,8 +41,8 @@ type CleaningArea struct {
 	IsActive             bool                `json:"is_active"`
 	CreatedAt            time.Time           `json:"created_at"`
 	UpdatedAt            time.Time           `json:"updated_at"`
-	ActiveTicketCount    *int                `json:"active_ticket_count,omitempty"`
-	DefaultContractorOrg *OrganizationLookup `json:"default_contractor,omitempty"`
+	ActiveTicketCount    *int                `json:"active_ticket_count,omitempty" gorm:"-"`
+	DefaultContractorOrg *OrganizationLookup `json:"default_contractor,omitempty" gorm:"-"`
 }
 
 type Polygon struct {
