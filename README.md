@@ -70,7 +70,8 @@ go run ./cmd/operations-service
 | `GET /cleaning-areas/:id` | Детальная карточка участка. | См. список |
 | `PATCH /cleaning-areas/:id` | Обновить метаданные (`name`, `description`, `status`, `default_contractor_id`). | KGU, (Akimat с флагом) |
 | `PATCH /cleaning-areas/:id/geometry` | Обновить геометрию (GeoJSON). | KGU / Akimat (если флаг) |
-| `DELETE /cleaning-areas/:id` | Удалить участок. Нельзя удалить, если есть связанные тикеты. | KGU, (Akimat с флагом) |
+| `GET /cleaning-areas/:id/deletion-info` | Получить информацию о связанных данных перед удалением. | KGU, (Akimat с флагом) |
+| `DELETE /cleaning-areas/:id?force=true` | Удалить участок. Без `force` нельзя удалить, если есть связанные тикеты. С `force=true` удаляет все связанные данные каскадно. | KGU, (Akimat с флагом) |
 | `GET /cleaning-areas/:id/access` | История выдач доступа подрядчикам. | KGU/Akimat (все), Contractor — только для своих участков |
 | `POST /cleaning-areas/:id/access` | Выдать доступ подрядчику (`contractor_id`, `source`). | KGU |
 | `DELETE /cleaning-areas/:id/access/:contractorId` | Отозвать доступ. | KGU |
@@ -123,16 +124,64 @@ curl -X POST https://ops.local/cleaning-areas/96a04122-.../access \
       }'
 ```
 
-**Пример `DELETE /cleaning-areas/:id`**
+**Пример `GET /cleaning-areas/:id/deletion-info`**
+```bash
+curl -X GET https://ops.local/cleaning-areas/96a04122-.../deletion-info \
+  -H "Authorization: Bearer <token>"
+```
+
+Ответ показывает все связанные данные:
+```json
+{
+  "data": {
+    "area": {
+      "id": "96a04122-...",
+      "name": "Мкрн. Север"
+    },
+    "dependencies": {
+      "tickets_count": 5,
+      "trips_count": 12,
+      "assignments_count": 8,
+      "appeals_count": 2,
+      "violations_count": 3,
+      "access_records_count": 4
+    },
+    "will_be_deleted": {
+      "tickets": true,
+      "trips": true,
+      "assignments": true,
+      "appeals": true,
+      "violations": true,
+      "access_records": true
+    }
+  }
+}
+```
+
+**Пример `DELETE /cleaning-areas/:id` (без force)**
 ```bash
 curl -X DELETE https://ops.local/cleaning-areas/96a04122-... \
   -H "Authorization: Bearer <token>"
 ```
 
+**Пример `DELETE /cleaning-areas/:id?force=true` (каскадное удаление)**
+```bash
+curl -X DELETE "https://ops.local/cleaning-areas/96a04122-...?force=true" \
+  -H "Authorization: Bearer <token>"
+```
+
 **Ошибки:**
-- `409 Conflict` — участок нельзя удалить, так как есть связанные тикеты
+- `409 Conflict` — участок нельзя удалить, так как есть связанные тикеты (если `force` не указан)
 - `404 Not Found` — участок не найден
 - `403 Forbidden` — недостаточно прав
+
+**Примечание:** При `force=true` удаляются все связанные данные:
+- **Тикеты** (tickets) — удаляются
+- **Назначения водителей** (ticket_assignments) — удаляются каскадно
+- **Апелляции** (appeals) — удаляются каскадно
+- **Рейсы** (trips) — `ticket_id` становится NULL
+- **Нарушения** (violations) — остаются, но теряют связь с тикетами через рейсы
+- **Записи доступа** (cleaning_area_access) — удаляются каскадно
 
 ---
 
@@ -140,18 +189,20 @@ curl -X DELETE https://ops.local/cleaning-areas/96a04122-... \
 
 | Эндпоинт | Описание | Доступ |
 |----------|----------|--------|
-| `GET /polygons?only_active=true` | Список полигонов; подрядчики видят только выданные; LANDFILL видит только свои полигоны. | Akimat/KGU/TOO — все; Contractor — только доступные; LANDFILL — только свои (organization_id) |
-| `POST /polygons` | Создать полигон (`name`, `address`, `geometry`, `organization_id`, `is_active`). | KGU, TOO, LANDFILL; Akimat если `FEATURE_ALLOW_AKIMAT_POLYGON_WRITE=true` |
+| `GET /polygons?only_active=true` | Список полигонов; подрядчики видят только выданные; LANDFILL видит только свои полигоны. | Akimat/KGU/LANDFILL — все; Contractor — только доступные; LANDFILL — только свои (organization_id) |
+| `POST /polygons` | Создать полигон (`name`, `address`, `geometry`, `organization_id`, `is_active`). | KGU, LANDFILL_ADMIN, LANDFILL_USER; Akimat если `FEATURE_ALLOW_AKIMAT_POLYGON_WRITE=true` |
 | `GET /polygons/:id` | Детали полигона. | Подрядчик должен иметь активный доступ; LANDFILL — только свои полигоны |
-| `PATCH /polygons/:id` | Обновить метаданные (имя, адрес, `is_active`). | KGU/TOO/(Akimat с флагом) |
-| `PATCH /polygons/:id/geometry` | Обновить геометрию (GeoJSON). | KGU/TOO/(Akimat с флагом) |
-| `DELETE /polygons/:id` | Удалить полигон. Нельзя удалить, если есть связанные рейсы. Камеры и доступы удалятся автоматически. | KGU/TOO/LANDFILL/(Akimat с флагом) |
-| `GET /polygons/:id/access` | История доступа подрядчиков. | KGU/TOO/LANDFILL/Akimat; Contractor — только когда имеет доступ |
-| `POST /polygons/:id/access` | Выдать доступ подрядчику. | KGU/TOO/LANDFILL |
-| `DELETE /polygons/:id/access/:contractorId` | Отозвать доступ. | KGU/TOO/LANDFILL |
-| `GET /polygons/:id/cameras` | Список камер полигона. | KGU/TOO/Contractor (при доступе) |
-| `POST /polygons/:id/cameras` | Создать камеру (`type`: `LPR`/`VOLUME`, `name`, `location`, `is_active`). | KGU/TOO |
-| `PATCH /polygons/:id/cameras/:cameraId` | Обновить камеру. | KGU/TOO |
+| `PATCH /polygons/:id` | Обновить метаданные (имя, адрес, `is_active`). | KGU/LANDFILL/(Akimat с флагом) |
+| `PATCH /polygons/:id/geometry` | Обновить геометрию (GeoJSON). | KGU/LANDFILL/(Akimat с флагом) |
+| `DELETE /polygons/:id` | Удалить полигон. Нельзя удалить, если есть связанные рейсы. Камеры и доступы удалятся автоматически. | KGU/LANDFILL/(Akimat с флагом) |
+| `GET /polygons/:id/access` | История доступа подрядчиков. | KGU/LANDFILL/Akimat; Contractor — только когда имеет доступ |
+| `POST /polygons/:id/access` | Выдать доступ подрядчику. | KGU/LANDFILL |
+| `DELETE /polygons/:id/access/:contractorId` | Отозвать доступ. | KGU/LANDFILL |
+| `GET /polygons/:id/cameras` | Список камер полигона. | KGU/LANDFILL/Contractor (при доступе) |
+| `POST /polygons/:id/cameras` | Создать камеру (`type`: `LPR`/`VOLUME`, `name`, `location`, `is_active`). | KGU/LANDFILL |
+| `PATCH /polygons/:id/cameras/:cameraId` | Обновить камеру. | KGU/LANDFILL |
+
+**Примечание:** Роль `TOO_ADMIN` помечена как deprecated и заменена на `LANDFILL_ADMIN` и `LANDFILL_USER`. Для обратной совместимости `TOO_ADMIN` все еще работает, но рекомендуется использовать новые роли.
 
 **Пример `POST /polygons`**
 ```bash

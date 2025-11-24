@@ -396,7 +396,8 @@ func (s *PolygonService) Delete(ctx context.Context, principal model.Principal, 
 }
 
 func (s *PolygonService) canManagePolygons(principal model.Principal) bool {
-	if principal.IsKgu() || principal.IsTechnicalOperator() || principal.IsLandfill() {
+	// KGU и LANDFILL роли (включая обратную совместимость с TOO_ADMIN)
+	if principal.IsKgu() || principal.IsLandfill() {
 		return true
 	}
 	if s.features.AllowAkimatWrite && principal.IsAkimat() {

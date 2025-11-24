@@ -47,6 +47,7 @@ func (h *Handler) Register(r *gin.Engine, authMiddleware gin.HandlerFunc) {
 	protected.GET("/cleaning-areas/:id", h.getArea)
 	protected.PATCH("/cleaning-areas/:id", h.updateArea)
 	protected.PATCH("/cleaning-areas/:id/geometry", h.updateAreaGeometry)
+	protected.GET("/cleaning-areas/:id/deletion-info", h.getAreaDeletionInfo)
 	protected.DELETE("/cleaning-areas/:id", h.deleteArea)
 	protected.GET("/cleaning-areas/:id/access", h.listAreaAccess)
 	protected.POST("/cleaning-areas/:id/access", h.grantAreaAccess)
@@ -407,6 +408,49 @@ func (h *Handler) revokeAreaAccess(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+func (h *Handler) getAreaDeletionInfo(c *gin.Context) {
+	principal, ok := middleware.MustPrincipal(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, errorResponse("missing principal"))
+		return
+	}
+
+	areaID, err := parseUUIDParam(c, "id")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, errorResponse("invalid area id"))
+		return
+	}
+
+	info, err := h.areas.GetDeletionInfo(c.Request.Context(), principal, areaID)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, successResponse(gin.H{
+		"area": gin.H{
+			"id":   info.Area.ID,
+			"name": info.Area.Name,
+		},
+		"dependencies": gin.H{
+			"tickets_count":        info.Dependencies.TicketsCount,
+			"trips_count":          info.Dependencies.TripsCount,
+			"assignments_count":    info.Dependencies.AssignmentsCount,
+			"appeals_count":        info.Dependencies.AppealsCount,
+			"violations_count":     info.Dependencies.ViolationsCount,
+			"access_records_count": info.Dependencies.AccessRecordsCount,
+		},
+		"will_be_deleted": gin.H{
+			"tickets":        info.Dependencies.TicketsCount > 0,
+			"trips":          info.Dependencies.TripsCount > 0,
+			"assignments":    info.Dependencies.AssignmentsCount > 0,
+			"appeals":        info.Dependencies.AppealsCount > 0,
+			"violations":     info.Dependencies.ViolationsCount > 0,
+			"access_records": info.Dependencies.AccessRecordsCount > 0,
+		},
+	}))
+}
+
 func (h *Handler) deleteArea(c *gin.Context) {
 	principal, ok := middleware.MustPrincipal(c)
 	if !ok {
@@ -420,7 +464,10 @@ func (h *Handler) deleteArea(c *gin.Context) {
 		return
 	}
 
-	if err := h.areas.Delete(c.Request.Context(), principal, areaID); err != nil {
+	// Проверяем параметр force для каскадного удаления
+	force := parseBoolQuery(c.Query("force"))
+
+	if err := h.areas.Delete(c.Request.Context(), principal, areaID, force); err != nil {
 		h.handleError(c, err)
 		return
 	}

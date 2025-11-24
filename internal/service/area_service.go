@@ -295,7 +295,33 @@ func normalizeOptionalString(value *string) *string {
 	return &result
 }
 
-func (s *AreaService) Delete(ctx context.Context, principal model.Principal, id uuid.UUID) error {
+func (s *AreaService) GetDeletionInfo(ctx context.Context, principal model.Principal, id uuid.UUID) (*DeletionInfo, error) {
+	if !s.canManageAreas(principal) {
+		return nil, ErrPermissionDenied
+	}
+
+	// Проверяем существование участка
+	area, err := s.repo.GetByID(ctx, id)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	// Получаем информацию о зависимостях
+	deps, err := s.repo.GetDependencies(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	return &DeletionInfo{
+		Area:         area,
+		Dependencies: deps,
+	}, nil
+}
+
+func (s *AreaService) Delete(ctx context.Context, principal model.Principal, id uuid.UUID, force bool) error {
 	if !s.canManageAreas(principal) {
 		return ErrPermissionDenied
 	}
@@ -309,17 +335,34 @@ func (s *AreaService) Delete(ctx context.Context, principal model.Principal, id 
 		return err
 	}
 
-	// Проверяем наличие связанных тикетов
-	hasTickets, err := s.repo.HasRelatedTickets(ctx, id)
-	if err != nil {
-		return err
-	}
-	if hasTickets {
-		return ErrAreaHasTickets
+	// Если force=false, проверяем наличие связанных тикетов
+	if !force {
+		hasTickets, err := s.repo.HasRelatedTickets(ctx, id)
+		if err != nil {
+			return err
+		}
+		if hasTickets {
+			return ErrAreaHasTickets
+		}
 	}
 
-	// Удаляем участок (cleaning_area_access удалится автоматически через CASCADE)
+	// Удаляем участок
+	// cleaning_area_access удалится автоматически через CASCADE
+	// tickets и связанные данные нужно удалить вручную, если force=true
+	if force {
+		// Удаляем тикеты (каскадно удалятся ticket_assignments и appeals)
+		// trips.ticket_id станет NULL автоматически через ON DELETE SET NULL
+		if err := s.repo.DeleteTicketsByAreaID(ctx, id); err != nil {
+			return err
+		}
+	}
+
 	return s.repo.Delete(ctx, id)
+}
+
+type DeletionInfo struct {
+	Area         *model.CleaningArea
+	Dependencies *repository.CleaningAreaDependencies
 }
 
 func (s *AreaService) canManageAreas(principal model.Principal) bool {

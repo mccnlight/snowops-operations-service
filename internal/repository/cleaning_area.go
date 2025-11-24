@@ -320,6 +320,87 @@ func (r *CleaningAreaRepository) HasRelatedTickets(ctx context.Context, id uuid.
 	return count > 0, nil
 }
 
+type CleaningAreaDependencies struct {
+	TicketsCount        int64 `json:"tickets_count"`
+	TripsCount          int64 `json:"trips_count"`
+	AssignmentsCount    int64 `json:"assignments_count"`
+	AppealsCount        int64 `json:"appeals_count"`
+	ViolationsCount     int64 `json:"violations_count"`
+	AccessRecordsCount  int64 `json:"access_records_count"`
+}
+
+func (r *CleaningAreaRepository) GetDependencies(ctx context.Context, id uuid.UUID) (*CleaningAreaDependencies, error) {
+	var deps CleaningAreaDependencies
+
+	// Считаем тикеты
+	if err := r.db.WithContext(ctx).
+		Table("tickets").
+		Where("cleaning_area_id = ?", id).
+		Count(&deps.TicketsCount).Error; err != nil {
+		return nil, err
+	}
+
+	// Считаем рейсы через тикеты
+	if err := r.db.WithContext(ctx).
+		Table("trips").
+		Joins("JOIN tickets ON tickets.id = trips.ticket_id").
+		Where("tickets.cleaning_area_id = ?", id).
+		Count(&deps.TripsCount).Error; err != nil {
+		return nil, err
+	}
+
+	// Считаем назначения водителей через тикеты
+	if err := r.db.WithContext(ctx).
+		Table("ticket_assignments").
+		Joins("JOIN tickets ON tickets.id = ticket_assignments.ticket_id").
+		Where("tickets.cleaning_area_id = ?", id).
+		Count(&deps.AssignmentsCount).Error; err != nil {
+		return nil, err
+	}
+
+	// Считаем апелляции через тикеты
+	if err := r.db.WithContext(ctx).
+		Table("appeals").
+		Joins("JOIN tickets ON tickets.id = appeals.ticket_id").
+		Where("tickets.cleaning_area_id = ? AND appeals.ticket_id IS NOT NULL", id).
+		Count(&deps.AppealsCount).Error; err != nil {
+		return nil, err
+	}
+
+	// Считаем нарушения через рейсы и тикеты
+	if err := r.db.WithContext(ctx).
+		Table("violations").
+		Joins("JOIN trips ON trips.id = violations.trip_id").
+		Joins("JOIN tickets ON tickets.id = trips.ticket_id").
+		Where("tickets.cleaning_area_id = ?", id).
+		Count(&deps.ViolationsCount).Error; err != nil {
+		return nil, err
+	}
+
+	// Считаем записи доступа (удалятся автоматически через CASCADE, но показываем для информации)
+	if err := r.db.WithContext(ctx).
+		Table("cleaning_area_access").
+		Where("cleaning_area_id = ?", id).
+		Count(&deps.AccessRecordsCount).Error; err != nil {
+		return nil, err
+	}
+
+	return &deps, nil
+}
+
+func (r *CleaningAreaRepository) DeleteTicketsByAreaID(ctx context.Context, areaID uuid.UUID) error {
+	// Удаляем тикеты, что каскадно удалит:
+	// - ticket_assignments (ON DELETE CASCADE)
+	// - appeals (ON DELETE CASCADE)
+	// trips.ticket_id станет NULL (ON DELETE SET NULL)
+	result := r.db.WithContext(ctx).
+		Table("tickets").
+		Where("cleaning_area_id = ?", areaID).
+		Delete(nil)
+	
+	return result.Error
+}
+
 func serializeStatuses(values []model.CleaningAreaStatus) []string {
 	result := make([]string, 0, len(values))
 	for _, s := range values {
