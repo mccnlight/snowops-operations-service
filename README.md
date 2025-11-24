@@ -4,8 +4,9 @@ Operations-service хранит и выдаёт картографические
 
 ## Возможности
 
-- Управление участками уборки с учётом ролей (`AKIMAT_ADMIN`, `KGU_ZKH_ADMIN`, `CONTRACTOR_ADMIN`, `TOO_ADMIN`).
+- Управление участками уборки с учётом ролей (`AKIMAT_ADMIN`, `KGU_ZKH_ADMIN`, `CONTRACTOR_ADMIN`, `LANDFILL_ADMIN`).
 - Управление полигонами/камерами и явная выдача доступа подрядчикам через `cleaning_area_access` и `polygon_access`.
+- Полигоны могут быть привязаны к LANDFILL организациям через поле `organization_id`.
 - Интеграционные эндпоинты: `polygon.contains(lat/lng)` и `camera_id → polygon` для LPR/volume систем.
 - **Мониторинг техники в реальном времени**: отображение положения транспортных средств на карте с GPS-треками.
 - **GPS-симулятор**: имитация движения техники по дорогам OSM со скоростью 20 км/ч для тестирования без реальных GPS-устройств.
@@ -127,14 +128,14 @@ curl -X POST https://ops.local/cleaning-areas/96a04122-.../access \
 
 | Эндпоинт | Описание | Доступ |
 |----------|----------|--------|
-| `GET /polygons?only_active=true` | Список полигонов; подрядчики видят только выданные. | Akimat/KGU/TOO — все; Contractor — только доступные |
-| `POST /polygons` | Создать полигон (`name`, `address`, `geometry`, `is_active`). | KGU и TOO, Akimat если `FEATURE_ALLOW_AKIMAT_POLYGON_WRITE=true` |
-| `GET /polygons/:id` | Детали полигона. | Подрядчик должен иметь активный доступ |
+| `GET /polygons?only_active=true` | Список полигонов; подрядчики видят только выданные; LANDFILL видит только свои полигоны. | Akimat/KGU/TOO — все; Contractor — только доступные; LANDFILL — только свои (organization_id) |
+| `POST /polygons` | Создать полигон (`name`, `address`, `geometry`, `organization_id`, `is_active`). | KGU, TOO, LANDFILL; Akimat если `FEATURE_ALLOW_AKIMAT_POLYGON_WRITE=true` |
+| `GET /polygons/:id` | Детали полигона. | Подрядчик должен иметь активный доступ; LANDFILL — только свои полигоны |
 | `PATCH /polygons/:id` | Обновить метаданные (имя, адрес, `is_active`). | KGU/TOO/(Akimat с флагом) |
 | `PATCH /polygons/:id/geometry` | Обновить геометрию (GeoJSON). | KGU/TOO/(Akimat с флагом) |
-| `GET /polygons/:id/access` | История доступа подрядчиков. | KGU/TOO/Akimat; Contractor — только когда имеет доступ |
-| `POST /polygons/:id/access` | Выдать доступ подрядчику. | KGU/TOO |
-| `DELETE /polygons/:id/access/:contractorId` | Отозвать доступ. | KGU/TOO |
+| `GET /polygons/:id/access` | История доступа подрядчиков. | KGU/TOO/LANDFILL/Akimat; Contractor — только когда имеет доступ |
+| `POST /polygons/:id/access` | Выдать доступ подрядчику. | KGU/TOO/LANDFILL |
+| `DELETE /polygons/:id/access/:contractorId` | Отозвать доступ. | KGU/TOO/LANDFILL |
 | `GET /polygons/:id/cameras` | Список камер полигона. | KGU/TOO/Contractor (при доступе) |
 | `POST /polygons/:id/cameras` | Создать камеру (`type`: `LPR`/`VOLUME`, `name`, `location`, `is_active`). | KGU/TOO |
 | `PATCH /polygons/:id/cameras/:cameraId` | Обновить камеру. | KGU/TOO |
@@ -148,9 +149,12 @@ curl -X POST https://ops.local/polygons \
         "name": "Полигон №1",
         "address": "ул. Промышленная, 5",
         "geometry": "{\"type\":\"Polygon\",\"coordinates\":[[[69.0,54.8],...]]}",
+        "organization_id": "uuid",
         "is_active": true
       }'
 ```
+
+**Примечание:** Поле `organization_id` опционально. Для LANDFILL организаций оно устанавливается автоматически из JWT токена. KGU может указать `organization_id` для привязки полигона к LANDFILL организации.
 
 **Пример `PATCH /polygons/:id`**
 ```bash
@@ -238,7 +242,8 @@ curl -X POST https://ops.local/polygons/511f.../cameras \
 
 **Права доступа:**
 - `AKIMAT_ADMIN`, `KGU_ZKH_ADMIN` — видят все машины
-- `TOO_ADMIN` — видят все машины (но не участки)
+- `LANDFILL_ADMIN`, `LANDFILL_USER` — видят все машины (но не участки)
+- `TOO_ADMIN` — видят все машины (но не участки) (deprecated, используйте LANDFILL_ADMIN)
 - `CONTRACTOR_ADMIN` — видят только свои машины
 - `DRIVER` — видят только машины, связанные с их тикетами
 

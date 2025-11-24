@@ -44,11 +44,13 @@ var migrationStatements = []string{
 		name TEXT NOT NULL,
 		address TEXT,
 		geometry geometry(POLYGON, 4326) NOT NULL,
+		organization_id UUID REFERENCES organizations(id),
 		is_active BOOLEAN NOT NULL DEFAULT TRUE,
 		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 	);`,
 	`CREATE INDEX IF NOT EXISTS idx_polygons_geometry ON polygons USING GIST (geometry);`,
+	`CREATE INDEX IF NOT EXISTS idx_polygons_organization_id ON polygons (organization_id) WHERE organization_id IS NOT NULL;`,
 	`CREATE TABLE IF NOT EXISTS cameras (
 		id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
 		polygon_id UUID NOT NULL REFERENCES polygons(id) ON DELETE CASCADE,

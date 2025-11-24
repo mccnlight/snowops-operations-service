@@ -54,6 +54,11 @@ func (s *PolygonService) List(ctx context.Context, principal model.Principal, in
 		filter.ContractorID = &principal.OrganizationID
 	}
 
+	// LANDFILL видит только свои полигоны
+	if principal.IsLandfill() {
+		filter.OrganizationID = &principal.OrganizationID
+	}
+
 	return s.polygons.List(ctx, filter)
 }
 
@@ -80,14 +85,22 @@ func (s *PolygonService) Get(ctx context.Context, principal model.Principal, id 
 		}
 	}
 
+	// LANDFILL может видеть только свои полигоны
+	if principal.IsLandfill() {
+		if polygon.OrganizationID == nil || *polygon.OrganizationID != principal.OrganizationID {
+			return nil, ErrPermissionDenied
+		}
+	}
+
 	return polygon, nil
 }
 
 type CreatePolygonInput struct {
-	Name     string
-	Address  *string
-	Geometry string
-	IsActive *bool
+	Name           string
+	Address        *string
+	Geometry       string
+	OrganizationID *uuid.UUID // Для LANDFILL организаций
+	IsActive       *bool
 }
 
 func (s *PolygonService) Create(ctx context.Context, principal model.Principal, input CreatePolygonInput) (*model.Polygon, error) {
@@ -107,11 +120,18 @@ func (s *PolygonService) Create(ctx context.Context, principal model.Principal, 
 		isActive = *input.IsActive
 	}
 
+	// Для LANDFILL автоматически устанавливаем organization_id
+	organizationID := input.OrganizationID
+	if principal.IsLandfill() {
+		organizationID = &principal.OrganizationID
+	}
+
 	params := repository.CreatePolygonParams{
-		Name:     strings.TrimSpace(input.Name),
-		Address:  normalizeOptionalString(input.Address),
-		Geometry: input.Geometry,
-		IsActive: isActive,
+		Name:           strings.TrimSpace(input.Name),
+		Address:        normalizeOptionalString(input.Address),
+		Geometry:       input.Geometry,
+		OrganizationID: organizationID,
+		IsActive:       isActive,
 	}
 
 	polygon, err := s.polygons.Create(ctx, params)
@@ -349,7 +369,7 @@ func (s *PolygonService) ResolveCameraPolygon(ctx context.Context, principal mod
 }
 
 func (s *PolygonService) canManagePolygons(principal model.Principal) bool {
-	if principal.IsKgu() || principal.IsTechnicalOperator() {
+	if principal.IsKgu() || principal.IsTechnicalOperator() || principal.IsLandfill() {
 		return true
 	}
 	if s.features.AllowAkimatWrite && principal.IsAkimat() {

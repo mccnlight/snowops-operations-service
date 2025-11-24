@@ -453,10 +453,11 @@ func (h *Handler) listPolygons(c *gin.Context) {
 }
 
 type createPolygonRequest struct {
-	Name     string  `json:"name"`
-	Address  *string `json:"address"`
-	Geometry string  `json:"geometry"`
-	IsActive *bool   `json:"is_active"`
+	Name           string     `json:"name"`
+	Address        *string    `json:"address"`
+	Geometry       string     `json:"geometry"`
+	OrganizationID *uuid.UUID `json:"organization_id,omitempty"` // Опционально, для LANDFILL устанавливается автоматически
+	IsActive       *bool      `json:"is_active"`
 }
 
 func (h *Handler) createPolygon(c *gin.Context) {
@@ -476,10 +477,11 @@ func (h *Handler) createPolygon(c *gin.Context) {
 		c.Request.Context(),
 		principal,
 		service.CreatePolygonInput{
-			Name:     req.Name,
-			Address:  req.Address,
-			Geometry: req.Geometry,
-			IsActive: req.IsActive,
+			Name:           req.Name,
+			Address:        req.Address,
+			Geometry:       req.Geometry,
+			OrganizationID: req.OrganizationID,
+			IsActive:       req.IsActive,
 		},
 	)
 	if err != nil {

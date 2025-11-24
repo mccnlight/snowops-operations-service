@@ -12,8 +12,9 @@ import (
 )
 
 type PolygonFilter struct {
-	OnlyActive   bool
-	ContractorID *uuid.UUID
+	OnlyActive     bool
+	ContractorID   *uuid.UUID
+	OrganizationID *uuid.UUID // Для фильтрации по LANDFILL организации
 }
 
 type PolygonRepository struct {
@@ -31,6 +32,7 @@ func (r *PolygonRepository) List(ctx context.Context, filter PolygonFilter) ([]m
 			p.name,
 			p.address,
 			ST_AsGeoJSON(p.geometry) AS geometry,
+			p.organization_id,
 			p.is_active,
 			p.created_at,
 			p.updated_at,
@@ -48,6 +50,10 @@ func (r *PolygonRepository) List(ctx context.Context, filter PolygonFilter) ([]m
 
 	if filter.OnlyActive {
 		query = query.Where("p.is_active = TRUE")
+	}
+
+	if filter.OrganizationID != nil {
+		query = query.Where("p.organization_id = ?", *filter.OrganizationID)
 	}
 
 	if filter.ContractorID != nil {
@@ -78,6 +84,7 @@ func (r *PolygonRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.P
 				p.name,
 				p.address,
 				ST_AsGeoJSON(p.geometry) AS geometry,
+				p.organization_id,
 				p.is_active,
 				p.created_at,
 				p.updated_at,
@@ -102,26 +109,28 @@ func (r *PolygonRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.P
 }
 
 type CreatePolygonParams struct {
-	Name     string
-	Address  *string
-	Geometry string
-	IsActive bool
+	Name           string
+	Address        *string
+	Geometry       string
+	OrganizationID *uuid.UUID // Для LANDFILL организаций
+	IsActive       bool
 }
 
 func (r *PolygonRepository) Create(ctx context.Context, params CreatePolygonParams) (*model.Polygon, error) {
 	var polygon model.Polygon
 	err := r.db.WithContext(ctx).Raw(`
-		INSERT INTO polygons (name, address, geometry, is_active)
-		VALUES (?, ?, ST_SetSRID(ST_GeomFromGeoJSON(?), 4326), ?)
+		INSERT INTO polygons (name, address, geometry, organization_id, is_active)
+		VALUES (?, ?, ST_SetSRID(ST_GeomFromGeoJSON(?), 4326), ?, ?)
 		RETURNING
 			id,
 			name,
 			address,
 			ST_AsGeoJSON(geometry) AS geometry,
+			organization_id,
 			is_active,
 			created_at,
 			updated_at
-	`, params.Name, params.Address, params.Geometry, params.IsActive).Scan(&polygon).Error
+	`, params.Name, params.Address, params.Geometry, params.OrganizationID, params.IsActive).Scan(&polygon).Error
 	if err != nil {
 		return nil, err
 	}
@@ -167,6 +176,7 @@ func (r *PolygonRepository) UpdateMetadata(ctx context.Context, params UpdatePol
 			name,
 			address,
 			ST_AsGeoJSON(geometry) AS geometry,
+			organization_id,
 			is_active,
 			created_at,
 			updated_at
@@ -196,6 +206,7 @@ func (r *PolygonRepository) UpdateGeometry(ctx context.Context, id uuid.UUID, ge
 			name,
 			address,
 			ST_AsGeoJSON(geometry) AS geometry,
+			organization_id,
 			is_active,
 			created_at,
 			updated_at

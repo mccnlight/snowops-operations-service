@@ -11,7 +11,9 @@ type UserRole string
 const (
 	UserRoleAkimatAdmin     UserRole = "AKIMAT_ADMIN"
 	UserRoleKguZkhAdmin     UserRole = "KGU_ZKH_ADMIN"
-	UserRoleTooAdmin        UserRole = "TOO_ADMIN"
+	UserRoleTooAdmin        UserRole = "TOO_ADMIN" // Deprecated: use LANDFILL_ADMIN
+	UserRoleLandfillAdmin   UserRole = "LANDFILL_ADMIN"
+	UserRoleLandfillUser    UserRole = "LANDFILL_USER"
 	UserRoleContractorAdmin UserRole = "CONTRACTOR_ADMIN"
 	UserRoleDriver          UserRole = "DRIVER"
 )
@@ -46,14 +48,15 @@ type CleaningArea struct {
 }
 
 type Polygon struct {
-	ID          uuid.UUID `json:"id"`
-	Name        string    `json:"name"`
-	Address     *string   `json:"address,omitempty"`
-	Geometry    string    `json:"geometry"` // GeoJSON
-	CameraCount *int      `json:"camera_count,omitempty"`
-	IsActive    bool      `json:"is_active"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID             uuid.UUID  `json:"id"`
+	Name           string     `json:"name"`
+	Address        *string    `json:"address,omitempty"`
+	Geometry       string     `json:"geometry"` // GeoJSON
+	OrganizationID *uuid.UUID `json:"organization_id,omitempty"` // Для LANDFILL организаций
+	CameraCount    *int       `json:"camera_count,omitempty"`
+	IsActive       bool       `json:"is_active"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
 }
 
 type Camera struct {
@@ -87,8 +90,16 @@ func (p Principal) IsKgu() bool {
 	return p.Role == UserRoleKguZkhAdmin
 }
 
+// IsTechnicalOperator проверяет, является ли пользователь техническим оператором
+// Поддерживает обратную совместимость с TOO_ADMIN и новые роли LANDFILL
 func (p Principal) IsTechnicalOperator() bool {
-	return p.Role == UserRoleTooAdmin
+	return p.Role == UserRoleTooAdmin || p.Role == UserRoleLandfillAdmin || p.Role == UserRoleLandfillUser
+}
+
+// IsLandfill проверяет, является ли пользователь администратором или пользователем полигона
+// Также поддерживает обратную совместимость с TOO_ADMIN
+func (p Principal) IsLandfill() bool {
+	return p.Role == UserRoleLandfillAdmin || p.Role == UserRoleLandfillUser || p.Role == UserRoleTooAdmin
 }
 
 func (p Principal) IsContractor() bool {
