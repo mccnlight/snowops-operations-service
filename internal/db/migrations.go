@@ -49,6 +49,13 @@ var migrationStatements = []string{
 		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 	);`,
+	`DO $$
+	BEGIN
+		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'polygons' AND column_name = 'organization_id') THEN
+			ALTER TABLE polygons ADD COLUMN organization_id UUID REFERENCES organizations(id);
+		END IF;
+	END
+	$$;`,
 	`CREATE INDEX IF NOT EXISTS idx_polygons_geometry ON polygons USING GIST (geometry);`,
 	`CREATE INDEX IF NOT EXISTS idx_polygons_organization_id ON polygons (organization_id) WHERE organization_id IS NOT NULL;`,
 	`CREATE TABLE IF NOT EXISTS cameras (
