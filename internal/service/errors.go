@@ -8,3 +8,8 @@ var (
 	ErrInvalidInput     = errors.New("invalid input")
 	ErrConflict         = errors.New("conflict")
 )
+
+var (
+	ErrAreaHasTickets   = errors.New("cannot delete cleaning area: it has related tickets")
+	ErrPolygonHasTrips   = errors.New("cannot delete polygon: it has related trips")
+)

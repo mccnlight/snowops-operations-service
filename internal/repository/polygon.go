@@ -220,6 +220,33 @@ func (r *PolygonRepository) UpdateGeometry(ctx context.Context, id uuid.UUID, ge
 	return &polygon, nil
 }
 
+func (r *PolygonRepository) Delete(ctx context.Context, id uuid.UUID) error {
+	result := r.db.WithContext(ctx).
+		Table("polygons").
+		Where("id = ?", id).
+		Delete(nil)
+	
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
+func (r *PolygonRepository) HasRelatedTrips(ctx context.Context, id uuid.UUID) (bool, error) {
+	var count int64
+	err := r.db.WithContext(ctx).
+		Table("trips").
+		Where("polygon_id = ?", id).
+		Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
 func (r *PolygonRepository) ContainsPoint(ctx context.Context, polygonID uuid.UUID, lat, lng float64) (bool, error) {
 	var contains bool
 	err := r.db.WithContext(ctx).Raw(`

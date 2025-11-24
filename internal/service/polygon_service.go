@@ -368,6 +368,33 @@ func (s *PolygonService) ResolveCameraPolygon(ctx context.Context, principal mod
 	return camera, polygon, nil
 }
 
+func (s *PolygonService) Delete(ctx context.Context, principal model.Principal, id uuid.UUID) error {
+	if !s.canManagePolygons(principal) {
+		return ErrPermissionDenied
+	}
+
+	// Проверяем существование полигона
+	_, err := s.polygons.GetByID(ctx, id)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+
+	// Проверяем наличие связанных рейсов
+	hasTrips, err := s.polygons.HasRelatedTrips(ctx, id)
+	if err != nil {
+		return err
+	}
+	if hasTrips {
+		return ErrPolygonHasTrips
+	}
+
+	// Удаляем полигон (cameras и polygon_access удалятся автоматически через CASCADE)
+	return s.polygons.Delete(ctx, id)
+}
+
 func (s *PolygonService) canManagePolygons(principal model.Principal) bool {
 	if principal.IsKgu() || principal.IsTechnicalOperator() || principal.IsLandfill() {
 		return true

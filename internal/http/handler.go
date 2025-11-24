@@ -47,6 +47,7 @@ func (h *Handler) Register(r *gin.Engine, authMiddleware gin.HandlerFunc) {
 	protected.GET("/cleaning-areas/:id", h.getArea)
 	protected.PATCH("/cleaning-areas/:id", h.updateArea)
 	protected.PATCH("/cleaning-areas/:id/geometry", h.updateAreaGeometry)
+	protected.DELETE("/cleaning-areas/:id", h.deleteArea)
 	protected.GET("/cleaning-areas/:id/access", h.listAreaAccess)
 	protected.POST("/cleaning-areas/:id/access", h.grantAreaAccess)
 	protected.DELETE("/cleaning-areas/:id/access/:contractorId", h.revokeAreaAccess)
@@ -57,6 +58,7 @@ func (h *Handler) Register(r *gin.Engine, authMiddleware gin.HandlerFunc) {
 	protected.GET("/polygons/:id", h.getPolygon)
 	protected.PATCH("/polygons/:id", h.updatePolygon)
 	protected.PATCH("/polygons/:id/geometry", h.updatePolygonGeometry)
+	protected.DELETE("/polygons/:id", h.deletePolygon)
 	protected.GET("/polygons/:id/access", h.listPolygonAccess)
 	protected.POST("/polygons/:id/access", h.grantPolygonAccess)
 	protected.DELETE("/polygons/:id/access/:contractorId", h.revokePolygonAccess)
@@ -405,6 +407,27 @@ func (h *Handler) revokeAreaAccess(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+func (h *Handler) deleteArea(c *gin.Context) {
+	principal, ok := middleware.MustPrincipal(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, errorResponse("missing principal"))
+		return
+	}
+
+	areaID, err := parseUUIDParam(c, "id")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, errorResponse("invalid area id"))
+		return
+	}
+
+	if err := h.areas.Delete(c.Request.Context(), principal, areaID); err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
 func (h *Handler) areaTicketTemplate(c *gin.Context) {
 	principal, ok := middleware.MustPrincipal(c)
 	if !ok {
@@ -686,6 +709,27 @@ func (h *Handler) grantPolygonAccess(c *gin.Context) {
 	c.JSON(http.StatusCreated, successResponse(gin.H{"granted": true}))
 }
 
+func (h *Handler) deletePolygon(c *gin.Context) {
+	principal, ok := middleware.MustPrincipal(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, errorResponse("missing principal"))
+		return
+	}
+
+	polygonID, err := parseUUIDParam(c, "id")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, errorResponse("invalid polygon id"))
+		return
+	}
+
+	if err := h.polygons.Delete(c.Request.Context(), principal, polygonID); err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
 func (h *Handler) revokePolygonAccess(c *gin.Context) {
 	principal, ok := middleware.MustPrincipal(c)
 	if !ok {
@@ -919,7 +963,7 @@ func (h *Handler) handleError(c *gin.Context, err error) {
 		c.JSON(http.StatusNotFound, errorResponse(err.Error()))
 	case errors.Is(err, service.ErrInvalidInput):
 		c.JSON(http.StatusBadRequest, errorResponse(err.Error()))
-	case errors.Is(err, service.ErrConflict):
+	case errors.Is(err, service.ErrConflict) || errors.Is(err, service.ErrAreaHasTickets) || errors.Is(err, service.ErrPolygonHasTrips):
 		c.JSON(http.StatusConflict, errorResponse(err.Error()))
 	default:
 		h.log.Error().Err(err).Msg("handler error")

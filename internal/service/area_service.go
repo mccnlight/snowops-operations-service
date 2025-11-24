@@ -295,6 +295,33 @@ func normalizeOptionalString(value *string) *string {
 	return &result
 }
 
+func (s *AreaService) Delete(ctx context.Context, principal model.Principal, id uuid.UUID) error {
+	if !s.canManageAreas(principal) {
+		return ErrPermissionDenied
+	}
+
+	// Проверяем существование участка
+	_, err := s.repo.GetByID(ctx, id)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+
+	// Проверяем наличие связанных тикетов
+	hasTickets, err := s.repo.HasRelatedTickets(ctx, id)
+	if err != nil {
+		return err
+	}
+	if hasTickets {
+		return ErrAreaHasTickets
+	}
+
+	// Удаляем участок (cleaning_area_access удалится автоматически через CASCADE)
+	return s.repo.Delete(ctx, id)
+}
+
 func (s *AreaService) canManageAreas(principal model.Principal) bool {
 	if principal.IsKgu() {
 		return true

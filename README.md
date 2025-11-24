@@ -70,6 +70,7 @@ go run ./cmd/operations-service
 | `GET /cleaning-areas/:id` | Детальная карточка участка. | См. список |
 | `PATCH /cleaning-areas/:id` | Обновить метаданные (`name`, `description`, `status`, `default_contractor_id`). | KGU, (Akimat с флагом) |
 | `PATCH /cleaning-areas/:id/geometry` | Обновить геометрию (GeoJSON). | KGU / Akimat (если флаг) |
+| `DELETE /cleaning-areas/:id` | Удалить участок. Нельзя удалить, если есть связанные тикеты. | KGU, (Akimat с флагом) |
 | `GET /cleaning-areas/:id/access` | История выдач доступа подрядчикам. | KGU/Akimat (все), Contractor — только для своих участков |
 | `POST /cleaning-areas/:id/access` | Выдать доступ подрядчику (`contractor_id`, `source`). | KGU |
 | `DELETE /cleaning-areas/:id/access/:contractorId` | Отозвать доступ. | KGU |
@@ -122,6 +123,17 @@ curl -X POST https://ops.local/cleaning-areas/96a04122-.../access \
       }'
 ```
 
+**Пример `DELETE /cleaning-areas/:id`**
+```bash
+curl -X DELETE https://ops.local/cleaning-areas/96a04122-... \
+  -H "Authorization: Bearer <token>"
+```
+
+**Ошибки:**
+- `409 Conflict` — участок нельзя удалить, так как есть связанные тикеты
+- `404 Not Found` — участок не найден
+- `403 Forbidden` — недостаточно прав
+
 ---
 
 ### Полигоны и камеры (`/polygons`)
@@ -133,6 +145,7 @@ curl -X POST https://ops.local/cleaning-areas/96a04122-.../access \
 | `GET /polygons/:id` | Детали полигона. | Подрядчик должен иметь активный доступ; LANDFILL — только свои полигоны |
 | `PATCH /polygons/:id` | Обновить метаданные (имя, адрес, `is_active`). | KGU/TOO/(Akimat с флагом) |
 | `PATCH /polygons/:id/geometry` | Обновить геометрию (GeoJSON). | KGU/TOO/(Akimat с флагом) |
+| `DELETE /polygons/:id` | Удалить полигон. Нельзя удалить, если есть связанные рейсы. Камеры и доступы удалятся автоматически. | KGU/TOO/LANDFILL/(Akimat с флагом) |
 | `GET /polygons/:id/access` | История доступа подрядчиков. | KGU/TOO/LANDFILL/Akimat; Contractor — только когда имеет доступ |
 | `POST /polygons/:id/access` | Выдать доступ подрядчику. | KGU/TOO/LANDFILL |
 | `DELETE /polygons/:id/access/:contractorId` | Отозвать доступ. | KGU/TOO/LANDFILL |
@@ -177,6 +190,17 @@ curl -X POST https://ops.local/polygons/511f.../access \
         "source": "MANUAL"
       }'
 ```
+
+**Пример `DELETE /polygons/:id`**
+```bash
+curl -X DELETE https://ops.local/polygons/511f... \
+  -H "Authorization: Bearer <token>"
+```
+
+**Ошибки:**
+- `409 Conflict` — полигон нельзя удалить, так как есть связанные рейсы
+- `404 Not Found` — полигон не найден
+- `403 Forbidden` — недостаточно прав
 
 **Пример `POST /polygons/:id/cameras`**
 ```bash

@@ -293,6 +293,33 @@ func (r *CleaningAreaRepository) FindAreaContainingPoint(ctx context.Context, la
 	return &area, nil
 }
 
+func (r *CleaningAreaRepository) Delete(ctx context.Context, id uuid.UUID) error {
+	result := r.db.WithContext(ctx).
+		Table("cleaning_areas").
+		Where("id = ?", id).
+		Delete(nil)
+	
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
+func (r *CleaningAreaRepository) HasRelatedTickets(ctx context.Context, id uuid.UUID) (bool, error) {
+	var count int64
+	err := r.db.WithContext(ctx).
+		Table("tickets").
+		Where("cleaning_area_id = ?", id).
+		Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
 func serializeStatuses(values []model.CleaningAreaStatus) []string {
 	result := make([]string, 0, len(values))
 	for _, s := range values {
