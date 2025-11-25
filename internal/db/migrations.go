@@ -211,6 +211,14 @@ var migrationStatements = []string{
 	`CREATE INDEX IF NOT EXISTS idx_gps_points_vehicle_id ON gps_points (vehicle_id);`,
 	`CREATE INDEX IF NOT EXISTS idx_gps_points_captured_at ON gps_points (vehicle_id, captured_at DESC);`,
 	`CREATE INDEX IF NOT EXISTS idx_gps_points_location ON gps_points USING GIST (ST_SetSRID(ST_MakePoint(lon, lat), 4326));`,
+	`CREATE TABLE IF NOT EXISTS driver_locations (
+		driver_id UUID PRIMARY KEY,
+		lat NUMERIC(9,6) NOT NULL,
+		lon NUMERIC(9,6) NOT NULL,
+		accuracy NUMERIC(6,2),
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	);`,
+	`CREATE INDEX IF NOT EXISTS idx_driver_locations_location ON driver_locations USING GIST (ST_SetSRID(ST_MakePoint(lon, lat), 4326));`,
 }
 
 func runMigrations(db *gorm.DB) error {

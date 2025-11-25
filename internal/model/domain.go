@@ -51,7 +51,7 @@ type Polygon struct {
 	ID             uuid.UUID  `json:"id"`
 	Name           string     `json:"name"`
 	Address        *string    `json:"address,omitempty"`
-	Geometry       string     `json:"geometry"` // GeoJSON
+	Geometry       string     `json:"geometry"`                  // GeoJSON
 	OrganizationID *uuid.UUID `json:"organization_id,omitempty"` // Для LANDFILL организаций
 	CameraCount    *int       `json:"camera_count,omitempty"`
 	IsActive       bool       `json:"is_active"`
@@ -147,4 +147,12 @@ type GPSPoint struct {
 	HeadingDeg  float64    `json:"heading_deg"`
 	RawPayload  *string    `json:"raw_payload,omitempty"`
 	CreatedAt   time.Time  `json:"created_at"`
+}
+
+type DriverLocation struct {
+	DriverID  uuid.UUID `json:"driver_id"`
+	Lat       float64   `json:"lat"`
+	Lon       float64   `json:"lon"`
+	Accuracy  *float64  `json:"accuracy,omitempty"`
+	UpdatedAt time.Time `json:"updated_at"`
 }

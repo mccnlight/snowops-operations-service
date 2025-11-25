@@ -36,6 +36,7 @@ func main() {
 	polygonAccessRepo := repository.NewPolygonAccessRepository(database)
 	vehicleRepo := repository.NewVehicleRepository(database)
 	gpsRepo := repository.NewGPSPointRepository(database)
+	driverLocationRepo := repository.NewDriverLocationRepository(database)
 
 	areaService := service.NewAreaService(
 		areaRepo,
@@ -60,10 +61,17 @@ func main() {
 		polygonRepo,
 		areaAccessRepo,
 	)
+	driverLocationService := service.NewDriverLocationService(driverLocationRepo)
 
 	tokenParser := auth.NewParser(cfg.Auth.AccessSecret)
 
-	handler := httphandler.NewHandler(areaService, polygonService, monitoringService, appLogger)
+	handler := httphandler.NewHandler(
+		areaService,
+		polygonService,
+		monitoringService,
+		driverLocationService,
+		appLogger,
+	)
 	authMiddleware := middleware.Auth(tokenParser)
 	router := httphandler.NewRouter(handler, authMiddleware, cfg.Environment)
 

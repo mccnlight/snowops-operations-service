@@ -18,23 +18,26 @@ import (
 )
 
 type Handler struct {
-	areas       *service.AreaService
-	polygons    *service.PolygonService
-	monitoring  *service.MonitoringService
-	log         zerolog.Logger
+	areas           *service.AreaService
+	polygons        *service.PolygonService
+	monitoring      *service.MonitoringService
+	driverLocations *service.DriverLocationService
+	log             zerolog.Logger
 }
 
 func NewHandler(
 	areas *service.AreaService,
 	polygons *service.PolygonService,
 	monitoring *service.MonitoringService,
+	driverLocations *service.DriverLocationService,
 	log zerolog.Logger,
 ) *Handler {
 	return &Handler{
-		areas:      areas,
-		polygons:   polygons,
-		monitoring: monitoring,
-		log:        log,
+		areas:           areas,
+		polygons:        polygons,
+		monitoring:      monitoring,
+		driverLocations: driverLocations,
+		log:             log,
 	}
 }
 
@@ -75,6 +78,10 @@ func (h *Handler) Register(r *gin.Engine, authMiddleware gin.HandlerFunc) {
 	monitoring := protected.Group("/monitoring")
 	monitoring.GET("/vehicles-live", h.vehiclesLive)
 	monitoring.GET("/vehicles/:id/track", h.vehicleTrack)
+
+	drivers := protected.Group("/drivers")
+	drivers.POST("/location", h.updateDriverLocation)
+	drivers.GET("/locations", h.driverLocationsList)
 }
 
 func (h *Handler) listAreas(c *gin.Context) {
@@ -1138,7 +1145,7 @@ func (h *Handler) vehiclesLive(c *gin.Context) {
 
 	c.JSON(http.StatusOK, successResponse(gin.H{
 		"timestamp": time.Now().Format(time.RFC3339),
-		"vehicles":   vehicles,
+		"vehicles":  vehicles,
 	}))
 }
 
@@ -1196,6 +1203,60 @@ func (h *Handler) vehicleTrack(c *gin.Context) {
 		"from":       from.Format(time.RFC3339),
 		"to":         to.Format(time.RFC3339),
 		"points":     points,
+	}))
+}
+
+type updateDriverLocationRequest struct {
+	Lat      float64  `json:"lat" binding:"required"`
+	Lon      float64  `json:"lon" binding:"required"`
+	Accuracy *float64 `json:"accuracy,omitempty"`
+}
+
+func (h *Handler) updateDriverLocation(c *gin.Context) {
+	principal, ok := middleware.MustPrincipal(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, errorResponse("missing principal"))
+		return
+	}
+
+	var req updateDriverLocationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, errorResponse(err.Error()))
+		return
+	}
+
+	err := h.driverLocations.UpdateLocation(
+		c.Request.Context(),
+		principal,
+		service.UpdateDriverLocationInput{
+			Lat:      req.Lat,
+			Lon:      req.Lon,
+			Accuracy: req.Accuracy,
+		},
+	)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
+func (h *Handler) driverLocationsList(c *gin.Context) {
+	principal, ok := middleware.MustPrincipal(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, errorResponse("missing principal"))
+		return
+	}
+
+	locations, err := h.driverLocations.GetDriverLocations(c.Request.Context(), principal)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, successResponse(gin.H{
+		"locations": locations,
 	}))
 }
 

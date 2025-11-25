@@ -9,6 +9,7 @@ Operations-service хранит и выдаёт картографические
 - Полигоны могут быть привязаны к LANDFILL организациям через поле `organization_id`.
 - Интеграционные эндпоинты: `polygon.contains(lat/lng)` и `camera_id → polygon` для LPR/volume систем.
 - **Мониторинг техники в реальном времени**: отображение положения транспортных средств на карте с GPS-треками.
+- **Онлайн-локации водителей**: сохранение текущей координаты с фронтенда и выдача данных для Akimat/KGU и самих водителей.
 - **GPS-симулятор**: имитация движения техники по дорогам OSM со скоростью 20 км/ч для тестирования без реальных GPS-устройств.
 
 ## Требования
@@ -369,6 +370,40 @@ curl -X POST https://ops.local/polygons/511f.../cameras \
         "captured_at": "2025-11-16T18:00:01Z",
         "speed_kmh": 18.5,
         "heading_deg": 90.0
+      }
+    ]
+  }
+}
+```
+
+---
+
+## Водители (`/drivers`)
+
+### `POST /drivers/location`
+Водитель отправляет текущую координату. Храним только последнюю точку (без истории).
+
+```bash
+curl -X POST https://ops.local/drivers/location \
+  -H "Authorization: Bearer <driver_token>" \
+  -H "Content-Type: application/json" \
+  -d '{ "lat": 54.8429, "lon": 69.2071, "accuracy": 12.5 }'
+```
+
+### `GET /drivers/locations`
+- `AKIMAT_ADMIN`, `KGU_ZKH_ADMIN` — видят всех водителей
+- `DRIVER` — видит только себя
+
+```json
+{
+  "data": {
+    "locations": [
+      {
+        "driver_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        "lat": 54.8429,
+        "lon": 69.2071,
+        "accuracy": 12.5,
+        "updated_at": "2025-11-16T18:34:55Z"
       }
     ]
   }
