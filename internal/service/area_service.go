@@ -41,7 +41,7 @@ type ListAreasInput struct {
 }
 
 func (s *AreaService) List(ctx context.Context, principal model.Principal, input ListAreasInput) ([]model.CleaningArea, error) {
-	if principal.IsDriver() || principal.IsTechnicalOperator() {
+	if principal.IsTechnicalOperator() {
 		return nil, ErrPermissionDenied
 	}
 
@@ -58,7 +58,7 @@ func (s *AreaService) List(ctx context.Context, principal model.Principal, input
 }
 
 func (s *AreaService) Get(ctx context.Context, principal model.Principal, id uuid.UUID) (*model.CleaningArea, error) {
-	if principal.IsDriver() || principal.IsTechnicalOperator() {
+	if principal.IsTechnicalOperator() {
 		return nil, ErrPermissionDenied
 	}
 
@@ -70,7 +70,7 @@ func (s *AreaService) Get(ctx context.Context, principal model.Principal, id uui
 		return nil, err
 	}
 
-	if principal.IsAkimat() || principal.IsKgu() {
+	if principal.IsAkimat() || principal.IsKgu() || principal.IsDriver() {
 		return area, nil
 	}
 
