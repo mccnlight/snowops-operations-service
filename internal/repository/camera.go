@@ -165,3 +165,18 @@ func (r *CameraRepository) Update(ctx context.Context, params UpdateCameraParams
 	}
 	return &camera, nil
 }
+
+func (r *CameraRepository) Delete(ctx context.Context, id uuid.UUID) error {
+	result := r.db.WithContext(ctx).
+		Table("cameras").
+		Where("id = ?", id).
+		Delete(nil)
+
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}

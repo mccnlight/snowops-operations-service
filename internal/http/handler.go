@@ -70,6 +70,7 @@ func (h *Handler) Register(r *gin.Engine, authMiddleware gin.HandlerFunc) {
 	protected.GET("/polygons/:id/cameras", h.listCameras)
 	protected.POST("/polygons/:id/cameras", h.createCamera)
 	protected.PATCH("/polygons/:id/cameras/:cameraId", h.updateCamera)
+	protected.DELETE("/polygons/:id/cameras/:cameraId", h.deleteCamera)
 
 	integrations := protected.Group("/integrations")
 	integrations.POST("/polygons/:id/contains", h.polygonContains)
@@ -78,6 +79,7 @@ func (h *Handler) Register(r *gin.Engine, authMiddleware gin.HandlerFunc) {
 	monitoring := protected.Group("/monitoring")
 	monitoring.GET("/vehicles-live", h.vehiclesLive)
 	monitoring.GET("/vehicles/:id/track", h.vehicleTrack)
+	monitoring.DELETE("/gps-points", h.deleteOldGPSPoints)
 
 	drivers := protected.Group("/drivers")
 	drivers.POST("/location", h.updateDriverLocation)
@@ -951,6 +953,27 @@ func (h *Handler) updateCamera(c *gin.Context) {
 	c.JSON(http.StatusOK, successResponse(camera))
 }
 
+func (h *Handler) deleteCamera(c *gin.Context) {
+	principal, ok := middleware.MustPrincipal(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, errorResponse("missing principal"))
+		return
+	}
+
+	cameraID, err := parseUUIDParam(c, "cameraId")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, errorResponse("invalid camera id"))
+		return
+	}
+
+	if err := h.polygons.DeleteCamera(c.Request.Context(), principal, cameraID); err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
 type polygonContainsRequest struct {
 	Latitude  float64 `json:"lat"`
 	Longitude float64 `json:"lng"`
@@ -1204,6 +1227,74 @@ func (h *Handler) vehicleTrack(c *gin.Context) {
 		"to":         to.Format(time.RFC3339),
 		"points":     points,
 	}))
+}
+
+func (h *Handler) deleteOldGPSPoints(c *gin.Context) {
+	principal, ok := middleware.MustPrincipal(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, errorResponse("missing principal"))
+		return
+	}
+
+	// Parse older_than parameter (required)
+	olderThanStr := c.Query("older_than")
+	if olderThanStr == "" {
+		// Also support days parameter as alternative
+		daysStr := c.Query("days")
+		if daysStr == "" {
+			c.JSON(http.StatusBadRequest, errorResponse("either older_than (RFC3339) or days parameter is required"))
+			return
+		}
+
+		days, err := parseDays(daysStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, errorResponse("invalid days parameter"))
+			return
+		}
+
+		olderThan := time.Now().AddDate(0, 0, -days)
+		deleted, err := h.monitoring.DeleteOldGPSPoints(c.Request.Context(), principal, olderThan)
+		if err != nil {
+			h.handleError(c, err)
+			return
+		}
+
+		c.JSON(http.StatusOK, successResponse(gin.H{
+			"deleted_count": deleted,
+			"cutoff_time":   olderThan.Format(time.RFC3339),
+		}))
+		return
+	}
+
+	// Parse older_than as RFC3339 timestamp
+	olderThan, err := time.Parse(time.RFC3339, olderThanStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, errorResponse("invalid older_than format (use RFC3339)"))
+		return
+	}
+
+	deleted, err := h.monitoring.DeleteOldGPSPoints(c.Request.Context(), principal, olderThan)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, successResponse(gin.H{
+		"deleted_count": deleted,
+		"cutoff_time":   olderThan.Format(time.RFC3339),
+	}))
+}
+
+func parseDays(s string) (int, error) {
+	var days int
+	_, err := fmt.Sscanf(s, "%d", &days)
+	if err != nil {
+		return 0, err
+	}
+	if days < 0 {
+		return 0, fmt.Errorf("days must be non-negative")
+	}
+	return days, nil
 }
 
 type updateDriverLocationRequest struct {

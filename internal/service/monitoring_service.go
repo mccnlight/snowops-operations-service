@@ -14,10 +14,10 @@ import (
 )
 
 type MonitoringService struct {
-	vehicleRepo   *repository.VehicleRepository
-	gpsRepo       *repository.GPSPointRepository
-	areaRepo      *repository.CleaningAreaRepository
-	polygonRepo   *repository.PolygonRepository
+	vehicleRepo    *repository.VehicleRepository
+	gpsRepo        *repository.GPSPointRepository
+	areaRepo       *repository.CleaningAreaRepository
+	polygonRepo    *repository.PolygonRepository
 	areaAccessRepo *repository.CleaningAreaAccessRepository
 }
 
@@ -29,24 +29,24 @@ func NewMonitoringService(
 	areaAccessRepo *repository.CleaningAreaAccessRepository,
 ) *MonitoringService {
 	return &MonitoringService{
-		vehicleRepo:   vehicleRepo,
-		gpsRepo:       gpsRepo,
-		areaRepo:      areaRepo,
-		polygonRepo:   polygonRepo,
+		vehicleRepo:    vehicleRepo,
+		gpsRepo:        gpsRepo,
+		areaRepo:       areaRepo,
+		polygonRepo:    polygonRepo,
 		areaAccessRepo: areaAccessRepo,
 	}
 }
 
 type VehicleLiveData struct {
-	VehicleID      uuid.UUID              `json:"vehicle_id"`
-	PlateNumber    string                 `json:"plate_number"`
-	ContractorID   *uuid.UUID             `json:"contractor_id,omitempty"`
-	ContractorName *string                `json:"contractor_name,omitempty"`
-	LastGPS        *GPSPointData          `json:"last_gps,omitempty"`
-	LastTicketID   *uuid.UUID             `json:"last_ticket_id,omitempty"`
-	LastAreaID     *uuid.UUID             `json:"last_cleaning_area_id,omitempty"`
-	LastPolygonID  *uuid.UUID             `json:"last_polygon_id,omitempty"`
-	Status         model.VehicleStatus     `json:"status"`
+	VehicleID      uuid.UUID           `json:"vehicle_id"`
+	PlateNumber    string              `json:"plate_number"`
+	ContractorID   *uuid.UUID          `json:"contractor_id,omitempty"`
+	ContractorName *string             `json:"contractor_name,omitempty"`
+	LastGPS        *GPSPointData       `json:"last_gps,omitempty"`
+	LastTicketID   *uuid.UUID          `json:"last_ticket_id,omitempty"`
+	LastAreaID     *uuid.UUID          `json:"last_cleaning_area_id,omitempty"`
+	LastPolygonID  *uuid.UUID          `json:"last_polygon_id,omitempty"`
+	Status         model.VehicleStatus `json:"status"`
 }
 
 type GPSPointData struct {
@@ -238,3 +238,22 @@ func (s *MonitoringService) GetVehicleTrack(ctx context.Context, principal model
 	return result, nil
 }
 
+func (s *MonitoringService) DeleteOldGPSPoints(ctx context.Context, principal model.Principal, olderThan time.Time) (int64, error) {
+	// Only KGU and Akimat can delete GPS points
+	if !principal.IsKgu() && !principal.IsAkimat() {
+		return 0, ErrPermissionDenied
+	}
+
+	// Ensure olderThan is in the past
+	if olderThan.After(time.Now()) {
+		return 0, ErrInvalidInput
+	}
+
+	// Delete GPS points older than the specified time
+	deleted, err := s.gpsRepo.DeleteOlderThan(ctx, olderThan)
+	if err != nil {
+		return 0, err
+	}
+
+	return deleted, nil
+}

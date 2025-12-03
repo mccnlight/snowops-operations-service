@@ -202,6 +202,7 @@ curl -X DELETE "https://ops.local/cleaning-areas/96a04122-...?force=true" \
 | `GET /polygons/:id/cameras` | Список камер полигона. | KGU/LANDFILL/Contractor (при доступе) |
 | `POST /polygons/:id/cameras` | Создать камеру (`type`: `LPR`/`VOLUME`, `name`, `location`, `is_active`). | KGU/LANDFILL |
 | `PATCH /polygons/:id/cameras/:cameraId` | Обновить камеру. | KGU/LANDFILL |
+| `DELETE /polygons/:id/cameras/:cameraId` | Удалить камеру. | KGU/LANDFILL |
 
 **Примечание:** Роль `TOO_ADMIN` помечена как deprecated и заменена на `LANDFILL_ADMIN` и `LANDFILL_USER`. Для обратной совместимости `TOO_ADMIN` все еще работает, но рекомендуется использовать новые роли.
 
@@ -266,6 +267,16 @@ curl -X POST https://ops.local/polygons/511f.../cameras \
         "is_active": true
       }'
 ```
+
+**Пример `DELETE /polygons/:id/cameras/:cameraId`**
+```bash
+curl -X DELETE https://ops.local/polygons/511f.../cameras/be73... \
+  -H "Authorization: Bearer <token>"
+```
+
+**Ошибки:**
+- `404 Not Found` — камера не найдена
+- `403 Forbidden` — недостаточно прав
 
 ---
 
@@ -375,6 +386,51 @@ curl -X POST https://ops.local/polygons/511f.../cameras \
   }
 }
 ```
+
+### `DELETE /monitoring/gps-points`
+
+Удаляет GPS-точки старше указанной даты. Используется для очистки старых данных и управления размером базы данных.
+
+**Права доступа:**
+- `KGU_ZKH_ADMIN`, `AKIMAT_ADMIN` — могут удалять GPS-точки
+
+**Параметры запроса (один из двух обязателен):**
+- `older_than` (опционально) — удалить точки старше указанной даты в формате RFC3339
+- `days` (опционально) — удалить точки старше N дней (альтернативный способ)
+
+**Пример с `older_than`:**
+```bash
+curl -X DELETE "https://ops.local/monitoring/gps-points?older_than=2024-01-01T00:00:00Z" \
+  -H "Authorization: Bearer <token>"
+```
+
+**Пример с `days`:**
+```bash
+curl -X DELETE "https://ops.local/monitoring/gps-points?days=30" \
+  -H "Authorization: Bearer <token>"
+```
+
+**Пример ответа:**
+```json
+{
+  "data": {
+    "deleted_count": 1250,
+    "cutoff_time": "2024-01-01T00:00:00Z"
+  }
+}
+```
+
+**Ошибки:**
+- `400 Bad Request` — не указан параметр `older_than` или `days`, либо неверный формат
+- `403 Forbidden` — недостаточно прав
+- `400 Bad Request` — указана дата в будущем (для `older_than`)
+
+**Примечание:** Этот эндпоинт полезен для:
+- Ручной очистки старых данных администраторами
+- Интеграции с внешними cron-задачами для автоматической очистки
+- Управления размером базы данных
+
+GPS-симулятор также автоматически очищает старые точки (настраивается через `GPS_SIMULATOR_CLEANUP_DAYS`), но этот эндпоинт позволяет выполнять очистку вручную или по расписанию.
 
 ---
 

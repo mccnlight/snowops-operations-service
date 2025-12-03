@@ -288,6 +288,39 @@ func (s *PolygonService) UpdateCamera(ctx context.Context, principal model.Princ
 	return camera, nil
 }
 
+func (s *PolygonService) DeleteCamera(ctx context.Context, principal model.Principal, cameraID uuid.UUID) error {
+	if !s.canManagePolygons(principal) {
+		return ErrPermissionDenied
+	}
+
+	// Verify camera exists
+	camera, err := s.cameras.GetByID(ctx, cameraID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+
+	// Verify polygon exists and user can manage it
+	if _, err := s.polygons.GetByID(ctx, camera.PolygonID); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrNotFound
+		}
+		return err
+	}
+
+	// Delete camera
+	if err := s.cameras.Delete(ctx, cameraID); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrNotFound
+		}
+		return err
+	}
+
+	return nil
+}
+
 func (s *PolygonService) ListAccess(ctx context.Context, principal model.Principal, polygonID uuid.UUID) ([]repository.PolygonAccessEntry, error) {
 	if !s.canManagePolygons(principal) {
 		return nil, ErrPermissionDenied
