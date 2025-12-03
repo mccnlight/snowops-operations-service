@@ -156,29 +156,10 @@ var migrationStatements = []string{
 		END IF;
 	END
 	$$;`,
-	`CREATE TABLE IF NOT EXISTS vehicles (
-		id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-		plate_number TEXT NOT NULL,
-		contractor_id UUID,
-		is_active BOOLEAN NOT NULL DEFAULT TRUE,
-		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-	);`,
-	`CREATE INDEX IF NOT EXISTS idx_vehicles_contractor_id ON vehicles (contractor_id) WHERE contractor_id IS NOT NULL;`,
-	`CREATE INDEX IF NOT EXISTS idx_vehicles_is_active ON vehicles (is_active);`,
-	`DO $$
-	BEGIN
-		IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_vehicles_updated_at') THEN
-			CREATE TRIGGER trg_vehicles_updated_at
-				BEFORE UPDATE ON vehicles
-				FOR EACH ROW
-				EXECUTE PROCEDURE set_updated_at();
-		END IF;
-	END
-	$$;`,
+	// Таблица vehicles создается сервисом snowops-roles, не создаем её здесь
 	`CREATE TABLE IF NOT EXISTS gps_devices (
 		id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-		vehicle_id UUID NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
+		vehicle_id UUID NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE, -- Ссылка на vehicles из snowops-roles (логическая связь)
 		imei TEXT,
 		is_active BOOLEAN NOT NULL DEFAULT TRUE,
 		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -199,7 +180,7 @@ var migrationStatements = []string{
 	`CREATE TABLE IF NOT EXISTS gps_points (
 		id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
 		gps_device_id UUID REFERENCES gps_devices(id) ON DELETE SET NULL,
-		vehicle_id UUID NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
+		vehicle_id UUID NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE, -- Ссылка на vehicles из snowops-roles (логическая связь)
 		captured_at TIMESTAMPTZ NOT NULL,
 		lat NUMERIC(9,6) NOT NULL,
 		lon NUMERIC(9,6) NOT NULL,
