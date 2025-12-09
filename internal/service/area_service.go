@@ -41,7 +41,8 @@ type ListAreasInput struct {
 }
 
 func (s *AreaService) List(ctx context.Context, principal model.Principal, input ListAreasInput) ([]model.CleaningArea, error) {
-	if principal.IsTechnicalOperator() {
+	// Block drivers (as per README: "TOO/Drivers — 403")
+	if principal.IsDriver() {
 		return nil, ErrPermissionDenied
 	}
 
@@ -58,7 +59,8 @@ func (s *AreaService) List(ctx context.Context, principal model.Principal, input
 }
 
 func (s *AreaService) Get(ctx context.Context, principal model.Principal, id uuid.UUID) (*model.CleaningArea, error) {
-	if principal.IsTechnicalOperator() {
+	// Block drivers (as per README: "TOO/Drivers — 403")
+	if principal.IsDriver() {
 		return nil, ErrPermissionDenied
 	}
 
@@ -70,7 +72,8 @@ func (s *AreaService) Get(ctx context.Context, principal model.Principal, id uui
 		return nil, err
 	}
 
-	if principal.IsAkimat() || principal.IsKgu() || principal.IsDriver() {
+	// Allow Akimat, KGU, Landfill (including TOO_ADMIN for backward compatibility)
+	if principal.IsAkimat() || principal.IsKgu() || principal.IsLandfill() {
 		return area, nil
 	}
 
@@ -367,6 +370,9 @@ type DeletionInfo struct {
 
 func (s *AreaService) canManageAreas(principal model.Principal) bool {
 	if principal.IsKgu() {
+		return true
+	}
+	if principal.IsLandfill() {
 		return true
 	}
 	if s.features.AllowAkimatWrite && principal.IsAkimat() {
