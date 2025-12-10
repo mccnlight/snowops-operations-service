@@ -41,11 +41,6 @@ type ListAreasInput struct {
 }
 
 func (s *AreaService) List(ctx context.Context, principal model.Principal, input ListAreasInput) ([]model.CleaningArea, error) {
-	// Block drivers (as per README: "TOO/Drivers — 403")
-	if principal.IsDriver() {
-		return nil, ErrPermissionDenied
-	}
-
 	filter := repository.CleaningAreaFilter{
 		Status:     input.Status,
 		OnlyActive: input.OnlyActive,
@@ -55,15 +50,14 @@ func (s *AreaService) List(ctx context.Context, principal model.Principal, input
 		filter.ContractorID = &principal.OrganizationID
 	}
 
+	if principal.IsDriver() && principal.DriverID != nil {
+		filter.DriverID = principal.DriverID
+	}
+
 	return s.repo.List(ctx, filter)
 }
 
 func (s *AreaService) Get(ctx context.Context, principal model.Principal, id uuid.UUID) (*model.CleaningArea, error) {
-	// Block drivers (as per README: "TOO/Drivers — 403")
-	if principal.IsDriver() {
-		return nil, ErrPermissionDenied
-	}
-
 	area, err := s.repo.GetByID(ctx, id)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrNotFound
@@ -82,6 +76,17 @@ func (s *AreaService) Get(ctx context.Context, principal model.Principal, id uui
 			return area, nil
 		}
 		hasAccess, err := s.accessRepo.HasAccessForContractor(ctx, area.ID, principal.OrganizationID)
+		if err != nil {
+			return nil, err
+		}
+		if hasAccess {
+			return area, nil
+		}
+		return nil, ErrPermissionDenied
+	}
+
+	if principal.IsDriver() && principal.DriverID != nil {
+		hasAccess, err := s.repo.HasAccessForDriver(ctx, area.ID, *principal.DriverID)
 		if err != nil {
 			return nil, err
 		}

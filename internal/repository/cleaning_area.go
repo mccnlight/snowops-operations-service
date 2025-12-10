@@ -14,6 +14,7 @@ import (
 type CleaningAreaFilter struct {
 	Status       []model.CleaningAreaStatus
 	ContractorID *uuid.UUID
+	DriverID     *uuid.UUID
 	OnlyActive   bool
 }
 
@@ -62,6 +63,19 @@ func (r *CleaningAreaRepository) List(ctx context.Context, filter CleaningAreaFi
 				)
 			)
 		`, *filter.ContractorID, *filter.ContractorID)
+	}
+
+	if filter.DriverID != nil {
+		query = query.Where(`
+			EXISTS (
+				SELECT 1
+				FROM ticket_assignments ta
+				JOIN tickets t ON t.id = ta.ticket_id
+				WHERE ta.driver_id = ?
+					AND ta.is_active = TRUE
+					AND t.cleaning_area_id = cleaning_areas.id
+			)
+		`, *filter.DriverID)
 	}
 
 	query = query.Order("name ASC")
@@ -298,7 +312,7 @@ func (r *CleaningAreaRepository) Delete(ctx context.Context, id uuid.UUID) error
 		Table("cleaning_areas").
 		Where("id = ?", id).
 		Delete(nil)
-	
+
 	if result.Error != nil {
 		return result.Error
 	}
@@ -321,12 +335,12 @@ func (r *CleaningAreaRepository) HasRelatedTickets(ctx context.Context, id uuid.
 }
 
 type CleaningAreaDependencies struct {
-	TicketsCount        int64 `json:"tickets_count"`
-	TripsCount          int64 `json:"trips_count"`
-	AssignmentsCount    int64 `json:"assignments_count"`
-	AppealsCount        int64 `json:"appeals_count"`
-	ViolationsCount     int64 `json:"violations_count"`
-	AccessRecordsCount  int64 `json:"access_records_count"`
+	TicketsCount       int64 `json:"tickets_count"`
+	TripsCount         int64 `json:"trips_count"`
+	AssignmentsCount   int64 `json:"assignments_count"`
+	AppealsCount       int64 `json:"appeals_count"`
+	ViolationsCount    int64 `json:"violations_count"`
+	AccessRecordsCount int64 `json:"access_records_count"`
 }
 
 func (r *CleaningAreaRepository) GetDependencies(ctx context.Context, id uuid.UUID) (*CleaningAreaDependencies, error) {
@@ -397,8 +411,23 @@ func (r *CleaningAreaRepository) DeleteTicketsByAreaID(ctx context.Context, area
 		Table("tickets").
 		Where("cleaning_area_id = ?", areaID).
 		Delete(nil)
-	
+
 	return result.Error
+}
+
+func (r *CleaningAreaRepository) HasAccessForDriver(ctx context.Context, areaID, driverID uuid.UUID) (bool, error) {
+	var exists bool
+	err := r.db.WithContext(ctx).Raw(`
+		SELECT EXISTS (
+			SELECT 1
+			FROM ticket_assignments ta
+			JOIN tickets t ON t.id = ta.ticket_id
+			WHERE ta.driver_id = ?
+				AND ta.is_active = TRUE
+				AND t.cleaning_area_id = ?
+		)
+	`, driverID, areaID).Scan(&exists).Error
+	return exists, err
 }
 
 func serializeStatuses(values []model.CleaningAreaStatus) []string {
