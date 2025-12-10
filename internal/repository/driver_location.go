@@ -52,3 +52,17 @@ func (r *DriverLocationRepository) GetAll(ctx context.Context) ([]model.DriverLo
 	}
 	return locations, nil
 }
+
+func (r *DriverLocationRepository) GetByContractor(ctx context.Context, contractorID uuid.UUID) ([]model.DriverLocation, error) {
+	var locations []model.DriverLocation
+	err := r.db.WithContext(ctx).
+		Table("driver_locations dl").
+		Joins("INNER JOIN drivers d ON d.id = dl.driver_id").
+		Where("d.contractor_id = ?", contractorID).
+		Select("dl.driver_id, dl.lat, dl.lon, dl.accuracy, dl.updated_at").
+		Find(&locations).Error
+	if err != nil {
+		return nil, err
+	}
+	return locations, nil
+}

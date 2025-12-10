@@ -55,8 +55,10 @@ type DriverLocationData struct {
 
 func (s *DriverLocationService) GetDriverLocations(ctx context.Context, principal model.Principal) ([]DriverLocationData, error) {
 	switch {
-	case principal.IsAkimat() || principal.IsKgu():
+	case principal.IsAkimat() || principal.IsKgu() || principal.IsLandfill():
 		return s.getAllLocations(ctx)
+	case principal.IsContractor():
+		return s.getContractorDriversLocations(ctx, principal)
 	case principal.IsDriver():
 		return s.getOwnLocation(ctx, principal)
 	default:
@@ -66,6 +68,25 @@ func (s *DriverLocationService) GetDriverLocations(ctx context.Context, principa
 
 func (s *DriverLocationService) getAllLocations(ctx context.Context) ([]DriverLocationData, error) {
 	locations, err := s.repo.GetAll(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]DriverLocationData, 0, len(locations))
+	for _, loc := range locations {
+		result = append(result, DriverLocationData{
+			DriverID:  loc.DriverID,
+			Lat:       loc.Lat,
+			Lon:       loc.Lon,
+			UpdatedAt: loc.UpdatedAt.Format(time.RFC3339),
+			Accuracy:  loc.Accuracy,
+		})
+	}
+	return result, nil
+}
+
+func (s *DriverLocationService) getContractorDriversLocations(ctx context.Context, principal model.Principal) ([]DriverLocationData, error) {
+	locations, err := s.repo.GetByContractor(ctx, principal.OrganizationID)
 	if err != nil {
 		return nil, err
 	}
