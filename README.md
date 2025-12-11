@@ -190,16 +190,16 @@ curl -X DELETE "https://ops.local/cleaning-areas/96a04122-...?force=true" \
 
 | Эндпоинт | Описание | Доступ |
 |----------|----------|--------|
-| `GET /polygons?only_active=true` | Список полигонов; подрядчики видят только выданные; LANDFILL видит только свои полигоны. | Akimat/KGU/LANDFILL — все; Contractor — только доступные; LANDFILL — только свои (organization_id) |
+| `GET /polygons?only_active=true` | Список полигонов; подрядчики видят только выданные; LANDFILL видит только свои полигоны; Drivers видят полигоны их подрядчика. | Akimat/KGU/LANDFILL — все; Contractor — только доступные; LANDFILL — только свои (organization_id); Driver — полигоны их подрядчика |
 | `POST /polygons` | Создать полигон (`name`, `address`, `geometry`, `organization_id`, `is_active`). | KGU, LANDFILL_ADMIN, LANDFILL_USER; Akimat если `FEATURE_ALLOW_AKIMAT_POLYGON_WRITE=true` |
-| `GET /polygons/:id` | Детали полигона. | Подрядчик должен иметь активный доступ; LANDFILL — только свои полигоны |
+| `GET /polygons/:id` | Детали полигона. | Подрядчик должен иметь активный доступ; LANDFILL — только свои полигоны; Driver — если их подрядчик имеет доступ |
 | `PATCH /polygons/:id` | Обновить метаданные (имя, адрес, `is_active`). | KGU/LANDFILL/(Akimat с флагом) |
 | `PATCH /polygons/:id/geometry` | Обновить геометрию (GeoJSON). | KGU/LANDFILL/(Akimat с флагом) |
 | `DELETE /polygons/:id` | Удалить полигон. Нельзя удалить, если есть связанные рейсы. Камеры и доступы удалятся автоматически. | KGU/LANDFILL/(Akimat с флагом) |
 | `GET /polygons/:id/access` | История доступа подрядчиков. | KGU/LANDFILL/Akimat; Contractor — только когда имеет доступ |
 | `POST /polygons/:id/access` | Выдать доступ подрядчику. | KGU/LANDFILL |
 | `DELETE /polygons/:id/access/:contractorId` | Отозвать доступ. | KGU/LANDFILL |
-| `GET /polygons/:id/cameras` | Список камер полигона. | KGU/LANDFILL/Contractor (при доступе) |
+| `GET /polygons/:id/cameras` | Список камер полигона. | KGU/LANDFILL/Contractor/Driver (при доступе к полигону) |
 | `POST /polygons/:id/cameras` | Создать камеру (`type`: `LPR`/`VOLUME`, `name`, `location`, `is_active`). | KGU/LANDFILL |
 | `PATCH /polygons/:id/cameras/:cameraId` | Обновить камеру. | KGU/LANDFILL |
 | `DELETE /polygons/:id/cameras/:cameraId` | Удалить камеру. | KGU/LANDFILL |

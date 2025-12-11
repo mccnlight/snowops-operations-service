@@ -42,16 +42,26 @@ type ListPolygonsInput struct {
 }
 
 func (s *PolygonService) List(ctx context.Context, principal model.Principal, input ListPolygonsInput) ([]model.Polygon, error) {
-	if principal.IsDriver() {
-		return nil, ErrPermissionDenied
-	}
-
 	filter := repository.PolygonFilter{
 		OnlyActive: input.OnlyActive,
 	}
 
 	if principal.IsContractor() {
 		filter.ContractorID = &principal.OrganizationID
+	} else if principal.IsDriver() {
+		// Drivers can see polygons their contractor has access to
+		if principal.DriverID == nil {
+			return []model.Polygon{}, nil
+		}
+		contractorID, err := s.polygons.GetContractorIDForDriver(ctx, *principal.DriverID)
+		if err != nil {
+			return nil, err
+		}
+		if contractorID == nil {
+			// Driver has no contractor assigned
+			return []model.Polygon{}, nil
+		}
+		filter.ContractorID = contractorID
 	}
 
 	// LANDFILL видит только свои полигоны
@@ -63,10 +73,6 @@ func (s *PolygonService) List(ctx context.Context, principal model.Principal, in
 }
 
 func (s *PolygonService) Get(ctx context.Context, principal model.Principal, id uuid.UUID) (*model.Polygon, error) {
-	if principal.IsDriver() {
-		return nil, ErrPermissionDenied
-	}
-
 	polygon, err := s.polygons.GetByID(ctx, id)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrNotFound
@@ -77,6 +83,25 @@ func (s *PolygonService) Get(ctx context.Context, principal model.Principal, id 
 
 	if principal.IsContractor() {
 		hasAccess, err := s.access.HasAccessForContractor(ctx, id, principal.OrganizationID)
+		if err != nil {
+			return nil, err
+		}
+		if !hasAccess {
+			return nil, ErrPermissionDenied
+		}
+	} else if principal.IsDriver() {
+		// Drivers can see polygons their contractor has access to
+		if principal.DriverID == nil {
+			return nil, ErrPermissionDenied
+		}
+		contractorID, err := s.polygons.GetContractorIDForDriver(ctx, *principal.DriverID)
+		if err != nil {
+			return nil, err
+		}
+		if contractorID == nil {
+			return nil, ErrPermissionDenied
+		}
+		hasAccess, err := s.access.HasAccessForContractor(ctx, id, *contractorID)
 		if err != nil {
 			return nil, err
 		}
@@ -191,11 +216,8 @@ func (s *PolygonService) UpdateGeometry(ctx context.Context, principal model.Pri
 }
 
 func (s *PolygonService) ListCameras(ctx context.Context, principal model.Principal, polygonID uuid.UUID) ([]model.Camera, error) {
-	if principal.IsDriver() {
-		return nil, ErrPermissionDenied
-	}
-
 	// ensure polygon exists and current principal may read it
+	// (drivers can see cameras if they can see the polygon)
 	if _, err := s.Get(ctx, principal, polygonID); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return nil, ErrNotFound

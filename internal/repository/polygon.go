@@ -225,7 +225,7 @@ func (r *PolygonRepository) Delete(ctx context.Context, id uuid.UUID) error {
 		Table("polygons").
 		Where("id = ?", id).
 		Delete(nil)
-	
+
 	if result.Error != nil {
 		return result.Error
 	}
@@ -259,4 +259,16 @@ func (r *PolygonRepository) ContainsPoint(ctx context.Context, polygonID uuid.UU
 		return false, err
 	}
 	return contains, nil
+}
+
+// GetContractorIDForDriver returns the contractor_id for a given driver_id
+func (r *PolygonRepository) GetContractorIDForDriver(ctx context.Context, driverID uuid.UUID) (*uuid.UUID, error) {
+	var contractorID *uuid.UUID
+	err := r.db.WithContext(ctx).
+		Raw(`SELECT contractor_id FROM drivers WHERE id = ?`, driverID).
+		Scan(&contractorID).Error
+	if err != nil {
+		return nil, err
+	}
+	return contractorID, nil
 }
