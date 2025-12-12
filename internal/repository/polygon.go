@@ -263,12 +263,16 @@ func (r *PolygonRepository) ContainsPoint(ctx context.Context, polygonID uuid.UU
 
 // GetContractorIDForDriver returns the contractor_id for a given driver_id
 func (r *PolygonRepository) GetContractorIDForDriver(ctx context.Context, driverID uuid.UUID) (*uuid.UUID, error) {
-	var contractorID *uuid.UUID
+	var result struct {
+		ContractorID *uuid.UUID `gorm:"column:contractor_id"`
+	}
+
 	err := r.db.WithContext(ctx).
 		Raw(`SELECT contractor_id FROM drivers WHERE id = ?`, driverID).
-		Scan(&contractorID).Error
+		Scan(&result).Error
 	if err != nil {
 		return nil, err
 	}
-	return contractorID, nil
+
+	return result.ContractorID, nil
 }
